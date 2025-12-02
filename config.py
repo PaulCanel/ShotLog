@@ -100,6 +100,8 @@ class ShotLogConfig:
     motor_initial_csv: str = ""
     motor_history_csv: str = ""
     motor_positions_output: str = "motor_positions_by_shot.csv"
+    manual_params: List[str] = field(default_factory=list)
+    manual_params_csv_path: str | None = "manual_params_by_shot.csv"
     folders: Dict[str, FolderConfig] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -117,6 +119,8 @@ class ShotLogConfig:
             "motor_initial_csv": self.motor_initial_csv,
             "motor_history_csv": self.motor_history_csv,
             "motor_positions_output": self.motor_positions_output,
+            "manual_params": list(self.manual_params),
+            "manual_params_csv_path": self.manual_params_csv_path,
             "folders": [folder.to_dict() for folder in self.folders.values()],
         }
 
@@ -142,6 +146,8 @@ class ShotLogConfig:
             motor_initial_csv=data.get("motor_initial_csv", ""),
             motor_history_csv=data.get("motor_history_csv", ""),
             motor_positions_output=data.get("motor_positions_output", "motor_positions_by_shot.csv"),
+            manual_params=list(data.get("manual_params", [])),
+            manual_params_csv_path=data.get("manual_params_csv_path", "manual_params_by_shot.csv"),
             folders=folders,
         )
         if not cfg.folders:
