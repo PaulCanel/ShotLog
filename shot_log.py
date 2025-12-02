@@ -16,56 +16,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
-
-# ============================================================
-#  DEFAULT CONFIGURATION
-# ============================================================
-
-DEFAULT_CONFIG = {
-    "raw_root_suffix": "ELI50069_RAW_DATA",
-    "clean_root_suffix": "ELI50069_CLEAN_DATA",
-
-    # Cameras / main folders (must match actual folder names)
-    "main_folders": [
-        "Lanex1", "Lanex2", "Lanex3", "Lanex4", "Lanex5",
-        "LanexGamma", "Lyso", "Csi", "DarkShadow",
-        "SideView", "TopView", "FROG"
-    ],
-
-    # Cameras expected for every shot (can be reduced via GUI)
-    "expected_cameras": [
-        "Lanex1", "Lanex2", "Lanex3", "Lanex4", "Lanex5",
-        "LanexGamma", "Lyso", "Csi", "DarkShadow",
-        "SideView", "TopView", "FROG"
-    ],
-
-    # Full time window around trigger mtime (in seconds).
-    # An image belongs to shot if |mtime - ref_mtime| <= full_window_s / 2.
-    "full_window_s": 10.0,
-
-    # Timeout (in seconds) after trigger (wall-clock time) to stop waiting.
-    # If all expected cameras arrive earlier, shot closes immediately (green).
-    "timeout_s": 20.0,
-
-    # Trigger system: list of cameras that can trigger a shot
-    "trigger_cameras": [
-        "Lanex5"   # default: only Lanex5, you can change from GUI
-    ],
-
-    # Global trigger keyword (can be any string, numbers, special chars, etc.)
-    "global_trigger_keyword": "shot",
-
-    # Keywords marking test images (ignored)
-    # !!! make sure "dark" is NOT here if you want DarkShadow to be used !!!
-    "test_keywords": ["test", "align"],
-
-    # State & logs
-    "state_file": "eli50069_state.json",
-    "log_dir": "rename_log",
-
-    # Worker loop interval (for checking shot timeouts)
-    "check_interval_s": 0.5,
-}
+from config import DEFAULT_CONFIG, FolderConfig, FolderFileSpec, ShotLogConfig
 
 
 # ============================================================
@@ -137,16 +88,16 @@ class ShotManager:
     Multiple shots can acquire in parallel.
     """
 
-    def __init__(self, root_path: str, config: dict, gui_queue: queue.Queue):
+    def __init__(self, root_path: str, config: ShotLogConfig, gui_queue: queue.Queue):
         self.root_path = Path(root_path).resolve()
-        self.config = config.copy()
+        self.config = config.clone()
         self.gui_queue = gui_queue
 
-        self.raw_root = self.root_path / self.config["raw_root_suffix"]
-        self.clean_root = self.root_path / self.config["clean_root_suffix"]
+        self.raw_root = self.root_path / self.config.raw_root_suffix
+        self.clean_root = self.root_path / self.config.clean_root_suffix
 
-        self.state_file = self.root_path / self.config["state_file"]
-        self.log_dir = self.root_path / self.config["log_dir"]
+        self.state_file = self.root_path / self.config.state_file
+        self.log_dir = self.root_path / self.config.log_dir
         ensure_dir(self.log_dir)
 
         self.running = False
@@ -252,13 +203,13 @@ class ShotManager:
         {shot_index: set(cameras_that_have_this_shot)}
         """
         per_shot_cams = {}
-        expected = self.config["expected_cameras"]
+        expected = self.config.expected_folders
 
         for cam in expected:
             cam_dir = self.clean_root / cam / date_str
             if not cam_dir.exists():
                 continue
-            for f in cam_dir.glob("*.tif*"):
+            for f in cam_dir.glob("*"):
                 idx = extract_shot_index_from_name(f.name)
                 if idx is None:
                     continue
@@ -278,7 +229,7 @@ class ShotManager:
 
         last_idx = max(per_shot_cams.keys())
         cams_present = per_shot_cams[last_idx]
-        missing = [c for c in self.config["expected_cameras"] if c not in cams_present]
+        missing = [c for c in self.config.expected_folders if c not in cams_present]
 
         self.last_shot_index_by_date[today] = max(self.last_shot_index_by_date.get(today, 0), last_idx)
         self.last_completed_shot = {
@@ -374,8 +325,8 @@ class ShotManager:
         for shots that are still collecting.
         """
         with self.lock:
-            self.config["full_window_s"] = full_window
-            self.config["timeout_s"] = timeout
+            self.config.full_window_s = full_window
+            self.config.timeout_s = timeout
 
             half_window = full_window / 2.0
             for s in self.open_shots:
@@ -386,17 +337,21 @@ class ShotManager:
 
         self._log("INFO", f"Updated timing parameters: full_window={full_window}s, timeout={timeout}s")
 
-    def update_trigger_config(self, trigger_cameras, global_keyword: str):
+    def update_keyword_settings(self, global_keyword: str, apply_global_to_all: bool):
         with self.lock:
-            self.config["trigger_cameras"] = list(trigger_cameras)
-            self.config["global_trigger_keyword"] = global_keyword
-        self._log("INFO", f"Updated trigger config: trigger_cameras={trigger_cameras}, "
-                          f"global_keyword='{global_keyword}'")
+            self.config.global_trigger_keyword = global_keyword
+            self.config.apply_global_keyword_to_all = apply_global_to_all
+        self._log(
+            "INFO",
+            f"Updated keyword settings: keyword='{global_keyword}', apply_to_all={apply_global_to_all}",
+        )
 
-    def update_expected_cameras(self, cams):
+    def update_config(self, new_config: ShotLogConfig):
         with self.lock:
-            self.config["expected_cameras"] = list(cams)
-        self._log("INFO", f"Updated expected cameras (used diagnostics): {cams}")
+            self.config = new_config.clone()
+            self.raw_root = self.root_path / self.config.raw_root_suffix
+            self.clean_root = self.root_path / self.config.clean_root_suffix
+        self._log("INFO", "Configuration updated for running manager.")
 
     def set_next_shot_number(self, k: int, date_str: str | None = None):
         if k < 1:
@@ -461,12 +416,12 @@ class ShotManager:
                 "current_shot_index": None,
 
                 # Timing
-                "full_window": self.config["full_window_s"],
-                "timeout": self.config["timeout_s"],
-                "current_keyword": self.config["global_trigger_keyword"],
+                "full_window": self.config.full_window_s,
+                "timeout": self.config.timeout_s,
+                "current_keyword": self.config.global_trigger_keyword,
             }
 
-            expected = self.config["expected_cameras"]
+            expected = self.config.expected_folders
 
             # CURRENT SHOT: most recent collecting shot
             if collecting:
@@ -512,7 +467,7 @@ class ShotManager:
 
     def _worker_loop(self):
         self._log("INFO", "Worker loop started.")
-        interval = self.config["check_interval_s"]
+        interval = self.config.check_interval_s
 
         while True:
             with self.lock:
@@ -542,8 +497,6 @@ class ShotManager:
                 return
 
         path = Path(path_str)
-        if path.suffix.lower() not in [".tif", ".tiff"]:
-            return
 
         try:
             mtime = os.path.getmtime(path_str)  # always use Modified time
@@ -569,21 +522,27 @@ class ShotManager:
             self._log("WARNING", f"File outside RAW root ignored: {path}")
             return
 
-        if len(rel.parts) < 3:
+        if len(rel.parts) < 2:
             self._log("WARNING", f"Unexpected RAW path structure: {path}")
             return
 
         main_folder = rel.parts[0]
+        if main_folder not in self.config.folders:
+            self._log("INFO", f"Ignoring file from unknown folder '{main_folder}': {path}")
+            return
+
         filename = rel.parts[-1]
         filename_lower = filename.lower()
 
-        dt = datetime.fromtimestamp(mtime)
-        date_str, time_str = format_dt_for_name(dt)
-
-        # Test images?
-        if any(kw in filename_lower for kw in self.config["test_keywords"]):
+        if any(kw.lower() in filename_lower for kw in self.config.test_keywords):
             self._log("INFO", f"[TEST] Ignoring test image: {path}")
             return
+
+        if not self.config.folder_matches(main_folder, filename_lower):
+            return
+
+        dt = datetime.fromtimestamp(mtime)
+        date_str, time_str = format_dt_for_name(dt)
 
         info = {
             "camera": main_folder,
@@ -604,15 +563,7 @@ class ShotManager:
             self._handle_non_trigger_file(info)
 
     def _is_trigger_file(self, camera: str, filename_lower: str) -> bool:
-        trigger_cams = set(self.config["trigger_cameras"])
-        if camera not in trigger_cams:
-            return False
-
-        keyword = self.config["global_trigger_keyword"]
-        if not keyword:
-            return False
-
-        return keyword.lower() in filename_lower
+        return self.config.is_trigger_file(camera, filename_lower)
 
     # =======================================================
     #  SHOT CREATION & ASSIGNMENT
@@ -637,7 +588,7 @@ class ShotManager:
         dt = info["dt"]          # reference mtime of this trigger
         date_str = info["date_str"]
 
-        full_window = self.config["full_window_s"]
+        full_window = self.config.full_window_s
         half_window = full_window / 2.0
 
         # Time window around this trigger
@@ -780,7 +731,7 @@ class ShotManager:
         with self.lock:
             if shot["status"] != "collecting":
                 return
-            expected = self.config["expected_cameras"]
+            expected = self.config.expected_folders
             present = set(shot["images_by_camera"].keys())
             missing = [c for c in expected if c not in present]
             if missing:
@@ -800,7 +751,7 @@ class ShotManager:
 
     def _check_shot_timeouts(self):
         now = datetime.now()
-        timeout = self.config["timeout_s"]
+        timeout = self.config.timeout_s
         to_close = []
 
         with self.lock:
@@ -821,13 +772,13 @@ class ShotManager:
         date_str = shot["date_str"]
         idx = shot["shot_index"]
         images = shot["images_by_camera"]
-        expected = self.config["expected_cameras"]
+        expected = self.config.expected_folders
 
         missing = [cam for cam in expected if cam not in images]
 
-        # Copy present data
+        # Copy present data (all configured folders with available files)
         for cam, finfo in images.items():
-            if cam in expected:
+            if cam in self.config.folders:
                 self._copy_to_clean(idx, cam, finfo)
 
         # ---- NEW: compute timing info for logging ----
@@ -887,9 +838,10 @@ class ShotManager:
     def _copy_to_clean(self, shot_index: int, cam: str, finfo: dict):
         src = Path(finfo["path"])
         dt = finfo["dt"]
-        ext = src.suffix.lower()
-        if ext not in [".tif", ".tiff"]:
-            ext = ".tif"
+        ext = src.suffix
+        if not ext:
+            ext = ".dat"
+        ext = ext.lower()
 
         date_str, time_str = format_dt_for_name(dt)
         dest_dir = self.clean_root / cam / date_str
@@ -917,12 +869,8 @@ class ShotManagerGUI:
         self.log_queue = queue.Queue()
         self.manager = None
 
-        # trigger cameras selection
-        self.trigger_cameras = list(DEFAULT_CONFIG["trigger_cameras"])
+        self.config = DEFAULT_CONFIG.clone()
         self.trigger_cam_vars = {}
-
-        # used cameras (expected_cameras)
-        self.used_cameras = list(DEFAULT_CONFIG["expected_cameras"])
         self.used_cam_vars = {}
 
         self._build_gui()
@@ -951,11 +899,11 @@ class ShotManagerGUI:
         frm_timing.pack(fill="x", padx=5, pady=5)
 
         ttk.Label(frm_timing, text="Full time window (s):").grid(row=0, column=0, sticky="w")
-        self.var_window = tk.StringVar(value=str(DEFAULT_CONFIG["full_window_s"]))
+        self.var_window = tk.StringVar(value=str(self.config.full_window_s))
         ttk.Entry(frm_timing, textvariable=self.var_window, width=10).grid(row=0, column=1, padx=5)
 
         ttk.Label(frm_timing, text="Timeout (s):").grid(row=1, column=0, sticky="w")
-        self.var_timeout = tk.StringVar(value=str(DEFAULT_CONFIG["timeout_s"]))
+        self.var_timeout = tk.StringVar(value=str(self.config.timeout_s))
         ttk.Entry(frm_timing, textvariable=self.var_timeout, width=10).grid(row=1, column=1, padx=5)
 
         ttk.Button(frm_timing, text="Apply timing", command=self._apply_timing) \
@@ -967,26 +915,42 @@ class ShotManagerGUI:
 
         # Global keyword + apply
         ttk.Label(frm_trig, text="Global trigger keyword:").grid(row=0, column=0, sticky="w")
-        self.var_global_kw = tk.StringVar(value=DEFAULT_CONFIG["global_trigger_keyword"])
+        self.var_global_kw = tk.StringVar(value=self.config.global_trigger_keyword)
+        self.var_apply_global_kw = tk.BooleanVar(value=self.config.apply_global_keyword_to_all)
         self.ent_global_kw = ttk.Entry(frm_trig, textvariable=self.var_global_kw, width=20)
         self.ent_global_kw.grid(row=0, column=1, padx=5)
         ttk.Button(frm_trig, text="Apply keyword", command=self._apply_keyword) \
             .grid(row=0, column=2, padx=5)
         self.ent_global_kw.bind("<Return>", lambda e: self._apply_keyword())
+        ttk.Checkbutton(
+            frm_trig,
+            text="Apply global keyword to all file definitions",
+            variable=self.var_apply_global_kw,
+            command=lambda: self._apply_keyword(apply_only_if_manager=False),
+        ).grid(row=1, column=0, columnspan=3, sticky="w", padx=5)
 
         # Trigger cameras selection
         ttk.Button(frm_trig, text="Select trigger cameras...", command=self._open_trigger_list) \
-            .grid(row=1, column=0, pady=5, sticky="w")
+            .grid(row=2, column=0, pady=5, sticky="w")
 
         self.lbl_trigger_cams = ttk.Label(frm_trig, text=self._format_trigger_cams_label())
-        self.lbl_trigger_cams.grid(row=1, column=1, sticky="w")
+        self.lbl_trigger_cams.grid(row=2, column=1, sticky="w")
 
         # Used cameras selection
         ttk.Button(frm_trig, text="Select used cameras...", command=self._open_used_list) \
-            .grid(row=2, column=0, pady=5, sticky="w")
+            .grid(row=3, column=0, pady=5, sticky="w")
 
         self.lbl_used_cams = ttk.Label(frm_trig, text=self._format_used_cams_label())
-        self.lbl_used_cams.grid(row=2, column=1, sticky="w")
+        self.lbl_used_cams.grid(row=3, column=1, sticky="w")
+
+        ttk.Button(frm_trig, text="Folder list...", command=self._open_folder_list).grid(
+            row=4, column=0, pady=5, sticky="w"
+        )
+
+        frm_cfg_file = ttk.LabelFrame(self.root, text="Configuration File")
+        frm_cfg_file.pack(fill="x", padx=5, pady=5)
+        ttk.Button(frm_cfg_file, text="Save config...", command=self._save_config).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Button(frm_cfg_file, text="Load config...", command=self._load_config).grid(row=0, column=1, padx=5, pady=5)
 
         # Next shot
         frm_next = ttk.LabelFrame(self.root, text="Next Shot Number")
@@ -1040,13 +1004,13 @@ class ShotManagerGUI:
         self.lbl_next.grid(row=3, column=1, sticky="w")
 
         ttk.Label(frm_status, text="Current keyword:").grid(row=4, column=0, sticky="w")
-        self.lbl_keyword = ttk.Label(frm_status, text=DEFAULT_CONFIG["global_trigger_keyword"])
+        self.lbl_keyword = ttk.Label(frm_status, text=self.config.global_trigger_keyword)
         self.lbl_keyword.grid(row=4, column=1, sticky="w")
 
         ttk.Label(frm_status, text="Timing (s):").grid(row=5, column=0, sticky="w")
         self.lbl_timing = ttk.Label(
             frm_status,
-            text=f"window={DEFAULT_CONFIG['full_window_s']} / timeout={DEFAULT_CONFIG['timeout_s']}"
+            text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
         )
         self.lbl_timing.grid(row=5, column=1, sticky="w")
 
@@ -1080,49 +1044,54 @@ class ShotManagerGUI:
     # ---------------------------
 
     def _format_trigger_cams_label(self):
-        if not self.trigger_cameras:
+        trigger_cameras = self.config.trigger_folders
+        if not trigger_cameras:
             return "None (no triggers)"
-        if len(self.trigger_cameras) == len(DEFAULT_CONFIG["main_folders"]):
+        if len(trigger_cameras) == len(self.config.folder_names):
             return "All cameras"
-        return ", ".join(self.trigger_cameras)
+        return ", ".join(trigger_cameras)
 
     def _format_used_cams_label(self):
-        if not self.used_cameras:
+        used_cameras = self.config.expected_folders
+        if not used_cameras:
             return "None (no cameras)"
-        if len(self.used_cameras) == len(DEFAULT_CONFIG["main_folders"]):
+        if len(used_cameras) == len(self.config.folder_names):
             return "All cameras"
-        return ", ".join(self.used_cameras)
+        return ", ".join(used_cameras)
 
     def _open_trigger_list(self):
         top = tk.Toplevel(self.root)
         top.title("Select Trigger Cameras")
 
         self.trigger_cam_vars = {}
-        for i, cam in enumerate(DEFAULT_CONFIG["main_folders"]):
-            var = tk.BooleanVar(value=(cam in self.trigger_cameras))
+        folder_names = self.config.folder_names
+        for i, cam in enumerate(folder_names):
+            var = tk.BooleanVar(value=self.config.folders[cam].trigger)
             self.trigger_cam_vars[cam] = var
             tk.Checkbutton(top, text=cam, variable=var).grid(row=i, column=0, sticky="w", padx=5, pady=2)
 
         def on_ok():
-            selected = [cam for cam, var in self.trigger_cam_vars.items() if var.get()]
-            if not selected:
+            has_any = any(var.get() for var in self.trigger_cam_vars.values())
+            if not has_any:
                 messagebox.showwarning("Warning", "No camera selected, at least one trigger camera is recommended.")
-            self.trigger_cameras = selected or []
+            for cam, var in self.trigger_cam_vars.items():
+                self.config.folders[cam].trigger = var.get()
             self.lbl_trigger_cams.configure(text=self._format_trigger_cams_label())
             # If manager already running, apply immediately
             if self.manager:
-                self.manager.update_trigger_config(self.trigger_cameras, self.var_global_kw.get())
+                self.manager.update_config(self.config.clone())
             top.destroy()
 
-        ttk.Button(top, text="OK", command=on_ok).grid(row=len(DEFAULT_CONFIG["main_folders"]), column=0, pady=5)
+        ttk.Button(top, text="OK", command=on_ok).grid(row=len(folder_names), column=0, pady=5)
 
     def _open_used_list(self):
         top = tk.Toplevel(self.root)
         top.title("Select Used Cameras (Expected)")
 
         self.used_cam_vars = {}
-        for i, cam in enumerate(DEFAULT_CONFIG["main_folders"]):
-            var = tk.BooleanVar(value=(cam in self.used_cameras))
+        folder_names = self.config.folder_names
+        for i, cam in enumerate(folder_names):
+            var = tk.BooleanVar(value=self.config.folders[cam].expected)
             self.used_cam_vars[cam] = var
             tk.Checkbutton(top, text=cam, variable=var).grid(row=i, column=0, sticky="w", padx=5, pady=2)
 
@@ -1130,14 +1099,15 @@ class ShotManagerGUI:
             selected = [cam for cam, var in self.used_cam_vars.items() if var.get()]
             if not selected:
                 messagebox.showwarning("Warning", "No camera selected, no diagnostics will be expected.")
-            self.used_cameras = selected or []
+            for cam, var in self.used_cam_vars.items():
+                self.config.folders[cam].expected = var.get()
             self.lbl_used_cams.configure(text=self._format_used_cams_label())
             # If manager already running, apply immediately
             if self.manager:
-                self.manager.update_expected_cameras(self.used_cameras)
+                self.manager.update_config(self.config.clone())
             top.destroy()
 
-        ttk.Button(top, text="OK", command=on_ok).grid(row=len(DEFAULT_CONFIG["main_folders"]), column=0, pady=5)
+        ttk.Button(top, text="OK", command=on_ok).grid(row=len(folder_names), column=0, pady=5)
 
     # ---------------------------
     # BUTTON HANDLERS
@@ -1163,16 +1133,20 @@ class ShotManagerGUI:
             messagebox.showerror("Error", f"Invalid root directory: {root_path}")
             return False
 
-        config = DEFAULT_CONFIG.copy()
-        config["trigger_cameras"] = list(self.trigger_cameras) if self.trigger_cameras else list(
-            DEFAULT_CONFIG["trigger_cameras"]
-        )
-        config["expected_cameras"] = list(self.used_cameras) if self.used_cameras else []
-        config["global_trigger_keyword"] = self.var_global_kw.get()
-        config["full_window_s"] = float(self.var_window.get() or DEFAULT_CONFIG["full_window_s"])
-        config["timeout_s"] = float(self.var_timeout.get() or DEFAULT_CONFIG["timeout_s"])
-        self.manager = ShotManager(root_path, config, self.log_queue)
+        runtime_config = self._build_runtime_config()
+        self.manager = ShotManager(root_path, runtime_config, self.log_queue)
         return True
+
+    def _build_runtime_config(self) -> ShotLogConfig:
+        cfg = self.config.clone()
+        cfg.global_trigger_keyword = self.var_global_kw.get()
+        cfg.apply_global_keyword_to_all = self.var_apply_global_kw.get()
+        try:
+            cfg.full_window_s = float(self.var_window.get() or cfg.full_window_s)
+            cfg.timeout_s = float(self.var_timeout.get() or cfg.timeout_s)
+        except ValueError:
+            messagebox.showerror("Error", "Full window and timeout must be numeric.")
+        return cfg
 
     def _start(self):
         if not self._ensure_manager():
@@ -1181,7 +1155,7 @@ class ShotManagerGUI:
         # Apply keyword & timing & used cameras to manager
         self._apply_keyword(apply_only_if_manager=True)
         self._apply_timing(apply_to_manager=True)
-        self.manager.update_expected_cameras(self.used_cameras)
+        self.manager.update_config(self._build_runtime_config())
 
         self.manager.start()
         self.btn_start.configure(state="disabled")
@@ -1217,6 +1191,9 @@ class ShotManagerGUI:
             messagebox.showerror("Error", "Full window and timeout must be numeric.")
             return
 
+        self.config.full_window_s = full_window
+        self.config.timeout_s = timeout
+
         if apply_to_manager and self.manager:
             self.manager.update_runtime_timing(full_window, timeout)
         else:
@@ -1229,10 +1206,10 @@ class ShotManagerGUI:
             return
 
         self.lbl_keyword.configure(text=kw)
-        trigger_cams = self.trigger_cameras or DEFAULT_CONFIG["trigger_cameras"]
-
+        self.config.global_trigger_keyword = kw
+        self.config.apply_global_keyword_to_all = self.var_apply_global_kw.get()
         if self.manager:
-            self.manager.update_trigger_config(trigger_cams, kw)
+            self.manager.update_keyword_settings(kw, self.config.apply_global_keyword_to_all)
         else:
             if not apply_only_if_manager:
                 self._append_log(f"[INFO] Keyword will be used at start: '{kw}'")
@@ -1265,6 +1242,212 @@ class ShotManagerGUI:
                 return
 
         self.manager.set_next_shot_number(k)
+
+    def _refresh_folder_labels(self):
+        self.lbl_trigger_cams.configure(text=self._format_trigger_cams_label())
+        self.lbl_used_cams.configure(text=self._format_used_cams_label())
+
+    def _open_folder_list(self):
+        top = tk.Toplevel(self.root)
+        top.title("Folder list")
+
+        columns = ("expected", "trigger", "specs")
+        tree = ttk.Treeview(top, columns=columns, show="headings", height=10)
+        tree.heading("expected", text="Expected")
+        tree.heading("trigger", text="Trigger")
+        tree.heading("specs", text="# file specs")
+        tree.column("expected", width=80, anchor="center")
+        tree.column("trigger", width=70, anchor="center")
+        tree.column("specs", width=90, anchor="center")
+        tree.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
+
+        top.grid_columnconfigure(0, weight=1)
+        top.grid_rowconfigure(0, weight=1)
+
+        def refresh_tree():
+            tree.delete(*tree.get_children())
+            for folder in self.config.folders.values():
+                tree.insert(
+                    "",
+                    "end",
+                    iid=folder.name,
+                    values=("yes" if folder.expected else "no", "yes" if folder.trigger else "no", len(folder.file_specs)),
+                )
+
+        def on_add():
+            new_cfg = self._open_folder_editor(top)
+            if new_cfg:
+                self.config.folders[new_cfg.name] = new_cfg
+                refresh_tree()
+                self._after_config_changed()
+
+        def on_edit():
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a folder to edit.")
+                return
+            name = selection[0]
+            current = self.config.folders.get(name)
+            edited = self._open_folder_editor(top, current)
+            if edited:
+                if edited.name != name:
+                    self.config.folders.pop(name, None)
+                self.config.folders[edited.name] = edited
+                refresh_tree()
+                self._after_config_changed()
+
+        def on_remove():
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a folder to remove.")
+                return
+            name = selection[0]
+            self.config.folders.pop(name, None)
+            refresh_tree()
+            self._after_config_changed()
+
+        ttk.Button(top, text="Add folder...", command=on_add).grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ttk.Button(top, text="Edit folder...", command=on_edit).grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        ttk.Button(top, text="Remove folder", command=on_remove).grid(row=1, column=2, sticky="w", padx=5, pady=5)
+
+        refresh_tree()
+
+    def _open_folder_editor(self, parent, folder: FolderConfig | None = None) -> FolderConfig | None:
+        top = tk.Toplevel(parent)
+        top.title("Add folder" if folder is None else f"Edit folder: {folder.name}")
+
+        name_var = tk.StringVar(value=folder.name if folder else "")
+        expected_var = tk.BooleanVar(value=folder.expected if folder else True)
+        trigger_var = tk.BooleanVar(value=folder.trigger if folder else False)
+
+        ttk.Label(top, text="Folder name:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(top, textvariable=name_var, width=25).grid(row=0, column=1, padx=5, pady=2)
+        ttk.Checkbutton(top, text="Expected", variable=expected_var).grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Checkbutton(top, text="Trigger", variable=trigger_var).grid(row=1, column=1, sticky="w", padx=5, pady=2)
+
+        ttk.Label(top, text="File definitions (keyword + extension)").grid(row=2, column=0, columnspan=2, sticky="w", padx=5)
+        spec_columns = ("keyword", "extension")
+        spec_tree = ttk.Treeview(top, columns=spec_columns, show="headings", height=5)
+        spec_tree.heading("keyword", text="Keyword")
+        spec_tree.heading("extension", text="Extension")
+        spec_tree.column("keyword", width=160)
+        spec_tree.column("extension", width=120)
+        spec_tree.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+
+        specs = [FolderFileSpec(keyword=s.keyword, extension=s.extension) for s in (folder.file_specs if folder else [FolderFileSpec(extension=".tif")])]
+
+        def refresh_specs():
+            spec_tree.delete(*spec_tree.get_children())
+            for idx, spec in enumerate(specs):
+                spec_tree.insert("", "end", iid=str(idx), values=(spec.keyword, spec.extension))
+
+        kw_var = tk.StringVar()
+        ext_var = tk.StringVar()
+
+        def add_spec():
+            specs.append(FolderFileSpec(keyword=kw_var.get().strip(), extension=ext_var.get().strip()))
+            kw_var.set("")
+            ext_var.set("")
+            refresh_specs()
+
+        def remove_spec():
+            selection = spec_tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Select a file spec to remove.")
+                return
+            idx = spec_tree.index(selection[0])
+            specs.pop(idx)
+            refresh_specs()
+
+        ttk.Label(top, text="Keyword:").grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(top, textvariable=kw_var, width=20).grid(row=4, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(top, text="Extension:").grid(row=5, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(top, textvariable=ext_var, width=20).grid(row=5, column=1, sticky="w", padx=5, pady=2)
+
+        ttk.Button(top, text="Add file spec", command=add_spec).grid(row=6, column=0, sticky="w", padx=5, pady=2)
+        ttk.Button(top, text="Remove file spec", command=remove_spec).grid(row=6, column=1, sticky="w", padx=5, pady=2)
+
+        ttk.Label(
+            top,
+            text="Global keyword can be enforced for all specs via the main checkbox.",
+            foreground="gray",
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+
+        result: dict[str, FolderConfig | None] = {"folder": None}
+
+        def on_ok():
+            name = name_var.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Folder name cannot be empty.")
+                return
+            if not specs:
+                messagebox.showerror("Error", "Please add at least one file definition.")
+                return
+            result["folder"] = FolderConfig(
+                name=name,
+                expected=expected_var.get(),
+                trigger=trigger_var.get(),
+                file_specs=[FolderFileSpec(keyword=s.keyword, extension=s.extension) for s in specs],
+            )
+            top.destroy()
+
+        ttk.Button(top, text="OK", command=on_ok).grid(row=8, column=0, sticky="e", padx=5, pady=5)
+        ttk.Button(top, text="Cancel", command=top.destroy).grid(row=8, column=1, sticky="w", padx=5, pady=5)
+
+        refresh_specs()
+        top.grab_set()
+        top.wait_window()
+        return result["folder"]
+
+    def _after_config_changed(self):
+        self._refresh_folder_labels()
+        if self.manager:
+            self.manager.update_config(self._build_runtime_config())
+
+    def _save_config(self):
+        cfg = self._build_runtime_config()
+        path = filedialog.asksaveasfilename(
+            title="Save configuration",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cfg.to_dict(), f, indent=2)
+            self._append_log(f"[INFO] Configuration saved to {path}")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to save configuration: {exc}")
+
+    def _load_config(self):
+        path = filedialog.askopenfilename(
+            title="Load configuration",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.config = ShotLogConfig.from_dict(data)
+            self._refresh_from_config()
+            if self.manager:
+                self.manager.update_config(self._build_runtime_config())
+            self._append_log(f"[INFO] Configuration loaded from {path}")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to load configuration: {exc}")
+
+    def _refresh_from_config(self):
+        self.var_window.set(str(self.config.full_window_s))
+        self.var_timeout.set(str(self.config.timeout_s))
+        self.var_global_kw.set(self.config.global_trigger_keyword)
+        self.var_apply_global_kw.set(self.config.apply_global_keyword_to_all)
+        self._refresh_folder_labels()
+        self.lbl_keyword.configure(text=self.config.global_trigger_keyword)
+        self.lbl_timing.configure(
+            text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
+        )
 
     # ---------------------------
     # LOG POLLING
@@ -1357,9 +1540,9 @@ class ShotManagerGUI:
             self.lbl_next.configure(text="-", fg="blue")
             self.lbl_last_status.configure(text="No shot yet", fg="black")
             self.lbl_current_status.configure(text="Waiting next shot", fg="blue")
-            self.lbl_keyword.configure(text=DEFAULT_CONFIG["global_trigger_keyword"])
+            self.lbl_keyword.configure(text=self.config.global_trigger_keyword)
             self.lbl_timing.configure(
-                text=f"window={DEFAULT_CONFIG['full_window_s']} / timeout={DEFAULT_CONFIG['timeout_s']}"
+                text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
             )
 
         self.root.after(500, self._update_status_labels)
