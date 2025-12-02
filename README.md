@@ -1,6 +1,13 @@
 # ShotLog
 Creation and visualisation of logs for laser shooting experiments.
 
+## Replay simulator
+
+Use `python shot_log_simulator.py` to replay a recorded experiment locally. The
+GUI copies RAW data and motor CSVs into a test directory over time, mimicking
+cloud synchronisation so you can run `shot_log.py` against the evolving dataset
+without touching the originals. See `SIMULATOR.md` for detailed usage.
+
 ## Folder configuration
 
 The GUI lets you manage cameras/sensors dynamically via **Folder list...** (per-folder expected/trigger flags and file definitions) and export/import the setup with **Save config...** / **Load config...**. See `CONFIG.md` for the JSON format and `Algo.md` for the core shot timing rules.
