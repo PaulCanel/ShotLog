@@ -7,6 +7,8 @@ ShotLog uses a JSON-based configuration that can be exported/imported from the G
 - `global_trigger_keyword`: required substring for trigger files.
 - `apply_global_keyword_to_all`: when `true`, the global keyword must also be present in every file definition match (not only triggers).
 - `test_keywords`: filenames containing any of these substrings are ignored.
+- `motor_initial_csv`, `motor_history_csv`: absolute or project-relative paths to the motor CSV files (initial positions and movement history).
+- `motor_positions_output`: destination CSV (absolute or project-relative) where motor positions will be written per shot.
 - `folders`: list of folder definitions, each containing:
   - `name`: folder name as it appears under RAW/CLEAN.
   - `expected`: whether the folder is required for completeness diagnostics.

@@ -7,6 +7,7 @@ import queue
 import shutil
 import logging
 import re
+import csv
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 from config import DEFAULT_CONFIG, FolderConfig, FolderFileSpec, ShotLogConfig
+from motor_data import MotorStateManager, parse_initial_positions, parse_motor_history
+from shot_log_reader import LogShotAnalyzer
 
 
 # ============================================================
@@ -98,6 +101,9 @@ class ShotManager:
 
         self.state_file = self.root_path / self.config.state_file
         self.log_dir = self.root_path / self.config.log_dir
+        self.motor_state_manager: MotorStateManager | None = None
+        self._motor_sources_mtime: dict[str, float] | None = None
+        self._refresh_motor_paths()
         ensure_dir(self.log_dir)
 
         self.running = False
@@ -128,6 +134,21 @@ class ShotManager:
         self._setup_logging()
         self._load_state()
         self._resync_last_shot_from_clean_today()
+
+    def _refresh_motor_paths(self):
+        def _resolve(p: str | Path | None, *, default: str | None = None) -> Path | None:
+            if not p and default is None:
+                return None
+            target = Path(p or default)
+            if not target.is_absolute():
+                target = self.root_path / target
+            return target
+
+        self.motor_initial_path = _resolve(self.config.motor_initial_csv)
+        self.motor_history_path = _resolve(self.config.motor_history_csv)
+        self.motor_positions_output = _resolve(
+            self.config.motor_positions_output, default="motor_positions_by_shot.csv"
+        )
 
     # ---------------------------
     # LOGGING
@@ -192,6 +213,186 @@ class ShotManager:
                 json.dump(state, f, indent=2)
         except Exception as e:
             self._log("ERROR", f"Could not save state: {e}")
+
+    # ---------------------------
+    # MOTOR DATA HANDLING
+    # ---------------------------
+
+    def _load_motor_state_manager(self, *, force_reload: bool = False) -> MotorStateManager | None:
+        if self.motor_initial_path is None or self.motor_history_path is None:
+            return None
+
+        try:
+            mtimes = {
+                "initial": os.path.getmtime(self.motor_initial_path),
+                "history": os.path.getmtime(self.motor_history_path),
+            }
+        except FileNotFoundError:
+            self._log("WARNING", "Motor CSV files not found; skipping motor correlation.")
+            return None
+
+        if (
+            not force_reload
+            and self.motor_state_manager is not None
+            and self._motor_sources_mtime == mtimes
+        ):
+            return self.motor_state_manager
+
+        try:
+            self._log("INFO", "Loading motor CSV files...")
+            initial_positions = parse_initial_positions(
+                self.motor_initial_path, logger=self._log
+            )
+            events = parse_motor_history(self.motor_history_path, logger=self._log)
+            self.motor_state_manager = MotorStateManager(initial_positions, events)
+            self._motor_sources_mtime = mtimes
+            self._log(
+                "INFO",
+                f"Motor data loaded: {len(initial_positions)} initial positions, {len(events)} events.",
+            )
+        except Exception as exc:
+            self.motor_state_manager = None
+            self._log("WARNING", f"Failed to load motor data: {exc}")
+        return self.motor_state_manager
+
+    def _write_motor_positions_for_shot(self, shot: dict):
+        manager = self._load_motor_state_manager()
+        if manager is None:
+            return
+
+        trigger_time = shot.get("trigger_time") or shot.get("ref_time")
+        if not isinstance(trigger_time, datetime):
+            self._log(
+                "WARNING",
+                f"Cannot write motor positions for shot {shot.get('shot_index')}: missing trigger time",
+            )
+            return
+
+        output_path = self.motor_positions_output
+        if output_path is None:
+            self._log("WARNING", "Motor positions output path is not configured.")
+            return
+
+        ensure_dir(output_path.parent)
+        desired_motors = sorted(manager.motor_names)
+        header_prefix = ["shot_number", "trigger_time"]
+        existing_rows: list[dict[str, str]] = []
+        existing_header: list[str] | None = None
+
+        if output_path.exists():
+            try:
+                with output_path.open("r", newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    existing_header = reader.fieldnames
+                    existing_rows = list(reader) if existing_header else []
+            except Exception as exc:
+                self._log("WARNING", f"Could not read existing motor positions file: {exc}")
+
+        if existing_header and len(existing_header) >= 2:
+            known_motors = existing_header[2:]
+            all_motors = sorted(set(known_motors) | set(desired_motors))
+        else:
+            all_motors = desired_motors
+
+        header = header_prefix + all_motors
+        positions = manager.get_positions_at(trigger_time)
+        row = {"shot_number": shot.get("shot_index"), "trigger_time": trigger_time.isoformat(sep=" ")}
+        for motor in all_motors:
+            val = positions.get(motor)
+            row[motor] = "" if val is None else val
+
+        existing_rows.append(row)
+
+        try:
+            with output_path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=header)
+                writer.writeheader()
+                writer.writerows(existing_rows)
+            self._log(
+                "INFO",
+                f"Motor positions recorded for shot {shot.get('shot_index'):03d} -> {output_path}",
+            )
+        except Exception as exc:
+            self._log("WARNING", f"Failed to write motor positions CSV: {exc}")
+
+    def _load_shots_from_logs(self) -> list[dict]:
+        analyzer = LogShotAnalyzer()
+        shots_by_key: dict[tuple[str, int], dict] = {}
+
+        if not self.log_dir.exists():
+            self._log("WARNING", f"Log directory not found: {self.log_dir}")
+            return []
+
+        for log_file in sorted(self.log_dir.glob("*.txt")):
+            try:
+                shots = analyzer.parse_log_file(log_file)
+            except Exception as exc:
+                self._log("WARNING", f"Failed to parse log file {log_file}: {exc}")
+                continue
+            for shot in shots:
+                date = shot.get("date")
+                num = shot.get("shot_number")
+                if date is None or num is None:
+                    continue
+                key = (date, num)
+                existing = shots_by_key.get(key)
+                if existing is None or (
+                    existing.get("trigger_time") is None and shot.get("trigger_time") is not None
+                ):
+                    shots_by_key[key] = shot
+
+        return [shots_by_key[k] for k in sorted(shots_by_key.keys())]
+
+    def recompute_all_motor_positions(self):
+        self._log("INFO", "Starting full recompute of motor positions for all shots...")
+        manager = self._load_motor_state_manager(force_reload=True)
+        if manager is None:
+            self._log("WARNING", "Motor data unavailable; recompute aborted.")
+            return
+
+        shots = self._load_shots_from_logs()
+        if not shots:
+            self._log("WARNING", "No shots found in logs; nothing to recompute.")
+            return
+
+        output_path = self.motor_positions_output
+        if output_path is None:
+            self._log("WARNING", "Motor positions output path is not configured.")
+            return
+
+        ensure_dir(output_path.parent)
+        motor_names = sorted(manager.motor_names)
+        header = ["shot_number", "trigger_time"] + motor_names
+        rows: list[dict[str, str | int | float | None]] = []
+
+        for shot in shots:
+            trigger_time = shot.get("trigger_time")
+            if not isinstance(trigger_time, datetime):
+                self._log(
+                    "WARNING",
+                    f"Shot {shot.get('shot_number')} missing trigger_time in logs; skipping.",
+                )
+                continue
+            positions = manager.get_positions_at(trigger_time)
+            row: dict[str, str | int | float | None] = {
+                "shot_number": shot.get("shot_number"),
+                "trigger_time": trigger_time.isoformat(sep=" "),
+            }
+            for motor in motor_names:
+                row[motor] = positions.get(motor)
+            rows.append(row)
+
+        try:
+            with output_path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=header)
+                writer.writeheader()
+                writer.writerows(rows)
+            self._log(
+                "INFO",
+                f"Recomputed motor positions for {len(rows)} shots -> {output_path}",
+            )
+        except Exception as exc:
+            self._log("WARNING", f"Failed to write recomputed motor positions: {exc}")
 
     # ---------------------------
     # RESYNC FROM CLEAN (on start)
@@ -351,6 +552,7 @@ class ShotManager:
             self.config = new_config.clone()
             self.raw_root = self.root_path / self.config.raw_root_suffix
             self.clean_root = self.root_path / self.config.clean_root_suffix
+            self._refresh_motor_paths()
         self._log("INFO", "Configuration updated for running manager.")
 
     def set_next_shot_number(self, k: int, date_str: str | None = None):
@@ -832,6 +1034,11 @@ class ShotManager:
             # Second log: detailed timing info
             self._log("INFO", timing_msg)
 
+        try:
+            self._write_motor_positions_for_shot(shot)
+        except Exception as exc:
+            self._log("WARNING", f"Failed to compute motor positions for shot {idx:03d}: {exc}")
+
         shot["status"] = "closed"
         self._save_state()
 
@@ -951,6 +1158,29 @@ class ShotManagerGUI:
         frm_cfg_file.pack(fill="x", padx=5, pady=5)
         ttk.Button(frm_cfg_file, text="Save config...", command=self._save_config).grid(row=0, column=0, padx=5, pady=5)
         ttk.Button(frm_cfg_file, text="Load config...", command=self._load_config).grid(row=0, column=1, padx=5, pady=5)
+
+        frm_motor = ttk.LabelFrame(self.root, text="Motor data")
+        frm_motor.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(frm_motor, text="Initial positions CSV:").grid(row=0, column=0, sticky="w")
+        self.var_motor_initial = tk.StringVar(value=self.config.motor_initial_csv)
+        ttk.Entry(frm_motor, textvariable=self.var_motor_initial, width=50).grid(row=0, column=1, sticky="we", padx=5)
+        ttk.Button(frm_motor, text="Browse...", command=self._choose_motor_initial).grid(row=0, column=2, padx=5)
+
+        ttk.Label(frm_motor, text="Motor history CSV:").grid(row=1, column=0, sticky="w")
+        self.var_motor_history = tk.StringVar(value=self.config.motor_history_csv)
+        ttk.Entry(frm_motor, textvariable=self.var_motor_history, width=50).grid(row=1, column=1, sticky="we", padx=5)
+        ttk.Button(frm_motor, text="Browse...", command=self._choose_motor_history).grid(row=1, column=2, padx=5)
+
+        ttk.Label(frm_motor, text="Positions by shot CSV:").grid(row=2, column=0, sticky="w")
+        self.var_motor_output = tk.StringVar(value=self.config.motor_positions_output)
+        ttk.Entry(frm_motor, textvariable=self.var_motor_output, width=50).grid(row=2, column=1, sticky="we", padx=5)
+        ttk.Button(frm_motor, text="Browse...", command=self._choose_motor_output).grid(row=2, column=2, padx=5)
+
+        ttk.Button(frm_motor, text="Recompute all motor positions", command=self._recompute_motor_positions).grid(
+            row=3, column=0, columnspan=3, sticky="w", padx=5, pady=5
+        )
+        frm_motor.columnconfigure(1, weight=1)
 
         # Next shot
         frm_next = ttk.LabelFrame(self.root, text="Next Shot Number")
@@ -1118,6 +1348,31 @@ class ShotManagerGUI:
         if d:
             self.var_root.set(d)
 
+    def _choose_motor_initial(self):
+        path = filedialog.askopenfilename(
+            title="Choose initial motor positions CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if path:
+            self.var_motor_initial.set(path)
+
+    def _choose_motor_history(self):
+        path = filedialog.askopenfilename(
+            title="Choose motor history CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if path:
+            self.var_motor_history.set(path)
+
+    def _choose_motor_output(self):
+        path = filedialog.asksaveasfilename(
+            title="Choose output CSV for motor positions by shot",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if path:
+            self.var_motor_output.set(path)
+
     def _ensure_manager(self):
         """
         Ensure self.manager exists (for operations allowed before Start),
@@ -1146,7 +1401,18 @@ class ShotManagerGUI:
             cfg.timeout_s = float(self.var_timeout.get() or cfg.timeout_s)
         except ValueError:
             messagebox.showerror("Error", "Full window and timeout must be numeric.")
+        cfg.motor_initial_csv = self.var_motor_initial.get()
+        cfg.motor_history_csv = self.var_motor_history.get()
+        cfg.motor_positions_output = self.var_motor_output.get()
         return cfg
+
+    def _recompute_motor_positions(self):
+        if not self._ensure_manager():
+            return
+        runtime_config = self._build_runtime_config()
+        self.config = runtime_config.clone()
+        self.manager.update_config(runtime_config)
+        self.manager.recompute_all_motor_positions()
 
     def _start(self):
         if not self._ensure_manager():
@@ -1443,6 +1709,9 @@ class ShotManagerGUI:
         self.var_timeout.set(str(self.config.timeout_s))
         self.var_global_kw.set(self.config.global_trigger_keyword)
         self.var_apply_global_kw.set(self.config.apply_global_keyword_to_all)
+        self.var_motor_initial.set(self.config.motor_initial_csv)
+        self.var_motor_history.set(self.config.motor_history_csv)
+        self.var_motor_output.set(self.config.motor_positions_output)
         self._refresh_folder_labels()
         self.lbl_keyword.configure(text=self.config.global_trigger_keyword)
         self.lbl_timing.configure(
