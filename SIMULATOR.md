@@ -28,13 +28,18 @@ Select the following inputs in the GUI:
   time is set.
 * **Start time**: optional timestamp (`YYYY-MM-DD HH:MM:SS` or ISO formats).
   If left empty, the simulator starts from the earliest RAW/motor timestamp.
+* **Simuler un seul jour**: when enabled, provide the day as `YYYYMMDD`.
+  Only RAW files whose path contains this date and motor events occurring on
+  that date are considered. The start time must belong to the selected day.
 
 ## Workflow
 
 1. Press **Set start time** to load the sources, generate jittered visibility
-   times, reset the test root, and populate it with everything visible up to the
-   chosen start time. The test root is rebuilt from scratch each time you press
-   this button after stopping the simulation.
+   times, reset the test root, and (outside of single-day mode) populate it with
+   everything visible up to the chosen start time. In single-day mode, only the
+   motor history up to the start time is written; RAW files begin to appear
+   starting from the first sync tick after Start. The test root is rebuilt from
+   scratch each time you press this button after stopping the simulation.
 2. Press **Start** to begin real-time replay. Files and motor rows are added at
    every cloud period, with jitter applied to their visibility times. The
    simulator rewrites the motor history CSV at each tick to reflect the current

@@ -16,7 +16,7 @@ import shutil
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -60,6 +60,9 @@ class SimulationState:
     history_csv_source: Path
     initial_csv_dest: Path
     history_csv_dest: Path
+    single_day: bool = False
+    filter_day: str | None = None
+    filter_date: date | None = None
     raw_index: int = 0
     motor_index: int = 0
     sim_time: Optional[datetime] = None
@@ -143,6 +146,23 @@ class SimulationController:
             events.append(MotorEventVisibility(event=evt, visible_time=visible_time))
         return events
 
+    def _filter_single_day(
+        self, raw_events: List[RawEvent], motor_events: List[MotorEventVisibility], day_filter: str
+    ) -> tuple[List[RawEvent], List[MotorEventVisibility], date]:
+        try:
+            target_day = datetime.strptime(day_filter, "%Y%m%d").date()
+        except ValueError:
+            raise ValueError("Day filter must be provided as YYYYMMDD.")
+
+        filtered_raw = [evt for evt in raw_events if day_filter in str(evt.rel_path)]
+        filtered_motor = [evt for evt in motor_events if evt.event.time.date() == target_day]
+
+        self._log_callback(
+            "INFO",
+            f"Single-day mode enabled for {day_filter}: {len(filtered_raw)} RAW files, {len(filtered_motor)} motor events.",
+        )
+        return filtered_raw, filtered_motor, target_day
+
     def _log_callback(self, level: str, message: str) -> None:
         _log_to_queue(self.gui_queue, level, message)
 
@@ -154,6 +174,9 @@ class SimulationController:
         test_root: Path,
         jitter_s: float,
         cloud_period_s: float,
+        *,
+        single_day: bool = False,
+        day_filter: str | None = None,
     ) -> SimulationState:
         if not raw_source.exists():
             raise FileNotFoundError(f"RAW source root not found: {raw_source}")
@@ -177,6 +200,17 @@ class SimulationController:
 
         raw_events = self._gather_raw_events(raw_data_root)
         motor_events = self._gather_motor_events(history_csv)
+        filter_date: date | None = None
+
+        if single_day:
+            if not day_filter:
+                raise ValueError("Single-day mode requires a day value (YYYYMMDD).")
+            raw_events, motor_events, filter_date = self._filter_single_day(raw_events, motor_events, day_filter)
+        else:
+            self._log_callback(
+                "INFO",
+                f"Loaded {len(raw_events)} RAW files and {len(motor_events)} motor events across all days.",
+            )
         if not raw_events and not motor_events:
             raise ValueError("No RAW files or motor events were found to replay.")
 
@@ -193,6 +227,9 @@ class SimulationController:
             history_csv_source=history_csv,
             initial_csv_dest=initial_dest,
             history_csv_dest=history_dest,
+            single_day=single_day,
+            filter_day=day_filter,
+            filter_date=filter_date,
             t_min=t_min,
         )
         self.last_seed_start = None
@@ -261,7 +298,19 @@ class SimulationController:
         self.state.motor_index = 0
         self.state.sim_time = start_time
         self.last_seed_start = start_time
-        self.sync_until(start_time)
+        if self.state.single_day:
+            while (
+                self.state.motor_index < len(self.state.motor_events)
+                and self.state.motor_events[self.state.motor_index].visible_time <= start_time
+            ):
+                self.state.motor_index += 1
+            self._log_callback(
+                "INFO",
+                f"Pre-filling {self.state.motor_index} motor events up to {start_time} for single-day mode.",
+            )
+            self._write_motor_history()
+        else:
+            self.sync_until(start_time)
 
     def sync_until(self, target_time: datetime) -> None:
         if self.state is None:
@@ -342,6 +391,8 @@ class ShotLogSimulatorApp:
         self.cloud_period_var = tk.StringVar(value="30")
         self.jitter_var = tk.StringVar(value="0")
         self.start_time_var = tk.StringVar()
+        self.single_day_var = tk.BooleanVar(value=False)
+        self.single_day_value = tk.StringVar()
 
         self._build_gui()
         self.root.after(200, self._drain_log_queue)
@@ -370,6 +421,16 @@ class ShotLogSimulatorApp:
         tk.Label(params_frame, text="Start time (YYYY-MM-DD HH:MM:SS)").grid(row=1, column=0, sticky="w")
         tk.Entry(params_frame, textvariable=self.start_time_var, width=25).grid(row=1, column=1, padx=5, sticky="w")
         tk.Button(params_frame, text="Set start time", command=self._handle_set_start).grid(row=1, column=2, padx=5)
+
+        self.single_day_entry = tk.Entry(params_frame, textvariable=self.single_day_value, width=15, state=tk.DISABLED)
+        tk.Checkbutton(
+            params_frame,
+            text="Simuler un seul jour",
+            variable=self.single_day_var,
+            command=self._toggle_single_day,
+        ).grid(row=2, column=0, sticky="w")
+        tk.Label(params_frame, text="Jour (YYYYMMDD)").grid(row=2, column=1, sticky="w")
+        self.single_day_entry.grid(row=2, column=2, padx=5, sticky="w")
 
         controls = tk.Frame(self.root)
         controls.pack(fill=tk.X, padx=10, pady=5)
@@ -412,6 +473,10 @@ class ShotLogSimulatorApp:
             path = filedialog.askopenfilename()
         if path:
             var.set(path)
+
+    def _toggle_single_day(self) -> None:
+        state = tk.NORMAL if self.single_day_var.get() else tk.DISABLED
+        self.single_day_entry.configure(state=state)
 
     def _error(self, message: str) -> None:
         messagebox.showerror("ShotLog Simulator", message)
@@ -467,6 +532,23 @@ class ShotLogSimulatorApp:
         jitter = self._get_float(self.jitter_var, default=0.0, minimum=0.0)
         cloud_period = self._get_float(self.cloud_period_var, default=30.0, minimum=0.1)
         start_time = self._parse_start_time()
+        single_day = self.single_day_var.get()
+        day_filter = self.single_day_value.get().strip()
+        filter_date: date | None = None
+
+        if single_day:
+            if not day_filter:
+                self._error("Please provide a day in YYYYMMDD when enabling single-day mode.")
+                raise ValueError
+            try:
+                filter_date = datetime.strptime(day_filter, "%Y%m%d").date()
+            except ValueError:
+                self._error("Day must be formatted YYYYMMDD (e.g., 20251202).")
+                raise
+            if start_time and start_time.date() != filter_date:
+                self._error("Start time must belong to the selected day in single-day mode.")
+                raise ValueError
+            _log_to_queue(self.gui_queue, "INFO", f"Using single-day filter {day_filter}.")
 
         try:
             state = self.controller.prepare_state(
@@ -476,6 +558,8 @@ class ShotLogSimulatorApp:
                 test_root=test_root,
                 jitter_s=jitter,
                 cloud_period_s=cloud_period,
+                single_day=single_day,
+                day_filter=day_filter if single_day else None,
             )
         except Exception as exc:
             self._error(str(exc))
@@ -484,6 +568,9 @@ class ShotLogSimulatorApp:
         effective_start = start_time or state.t_min
         if effective_start is None:
             self._error("Could not determine a start time from the data.")
+            raise ValueError
+        if single_day and state.filter_date and effective_start.date() != state.filter_date:
+            self._error("Effective start time does not match selected single-day filter.")
             raise ValueError
         self.controller.seed_to_start(effective_start)
         _log_to_queue(
