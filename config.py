@@ -97,6 +97,9 @@ class ShotLogConfig:
     state_file: str = "eli50069_state.json"
     log_dir: str = "rename_log"
     check_interval_s: float = 0.5
+    motor_initial_csv: str = ""
+    motor_history_csv: str = ""
+    motor_positions_output: str = "motor_positions_by_shot.csv"
     folders: Dict[str, FolderConfig] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -111,6 +114,9 @@ class ShotLogConfig:
             "state_file": self.state_file,
             "log_dir": self.log_dir,
             "check_interval_s": self.check_interval_s,
+            "motor_initial_csv": self.motor_initial_csv,
+            "motor_history_csv": self.motor_history_csv,
+            "motor_positions_output": self.motor_positions_output,
             "folders": [folder.to_dict() for folder in self.folders.values()],
         }
 
@@ -133,6 +139,9 @@ class ShotLogConfig:
             state_file=data.get("state_file", "eli50069_state.json"),
             log_dir=data.get("log_dir", "rename_log"),
             check_interval_s=float(data.get("check_interval_s", 0.5)),
+            motor_initial_csv=data.get("motor_initial_csv", ""),
+            motor_history_csv=data.get("motor_history_csv", ""),
+            motor_positions_output=data.get("motor_positions_output", "motor_positions_by_shot.csv"),
             folders=folders,
         )
         if not cfg.folders:
