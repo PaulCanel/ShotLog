@@ -104,6 +104,8 @@ class ShotManager:
         self.motor_state_manager: MotorStateManager | None = None
         self._motor_sources_mtime: dict[str, float] | None = None
         self._refresh_motor_paths()
+        self.manual_params = list(self.config.manual_params)
+        self._refresh_manual_params_path()
         ensure_dir(self.log_dir)
 
         self.running = False
@@ -135,19 +137,24 @@ class ShotManager:
         self._load_state()
         self._resync_last_shot_from_clean_today()
 
-    def _refresh_motor_paths(self):
-        def _resolve(p: str | Path | None, *, default: str | None = None) -> Path | None:
-            if not p and default is None:
-                return None
-            target = Path(p or default)
-            if not target.is_absolute():
-                target = self.root_path / target
-            return target
+    def _resolve_path(self, p: str | Path | None, *, default: str | None = None) -> Path | None:
+        if not p and default is None:
+            return None
+        target = Path(p or default)
+        if not target.is_absolute():
+            target = self.root_path / target
+        return target
 
-        self.motor_initial_path = _resolve(self.config.motor_initial_csv)
-        self.motor_history_path = _resolve(self.config.motor_history_csv)
-        self.motor_positions_output = _resolve(
+    def _refresh_motor_paths(self):
+        self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
+        self.motor_history_path = self._resolve_path(self.config.motor_history_csv)
+        self.motor_positions_output = self._resolve_path(
             self.config.motor_positions_output, default="motor_positions_by_shot.csv"
+        )
+
+    def _refresh_manual_params_path(self):
+        self.manual_params_csv_path = self._resolve_path(
+            self.config.manual_params_csv_path, default="manual_params_by_shot.csv"
         )
 
     # ---------------------------
@@ -553,6 +560,8 @@ class ShotManager:
             self.raw_root = self.root_path / self.config.raw_root_suffix
             self.clean_root = self.root_path / self.config.clean_root_suffix
             self._refresh_motor_paths()
+            self.manual_params = list(self.config.manual_params)
+            self._refresh_manual_params_path()
         self._log("INFO", "Configuration updated for running manager.")
 
     def set_next_shot_number(self, k: int, date_str: str | None = None):
@@ -603,6 +612,9 @@ class ShotManager:
                 "last_shot_date": last_date_idx[0] if last_date_idx else None,
                 "last_shot_index": last_date_idx[1] if last_date_idx else None,
                 "next_shot_number": self.get_next_shot_number_today(),
+                "last_completed_shot_index": None,
+                "last_completed_shot_date": None,
+                "last_completed_trigger_time": None,
 
                 # Last shot panel
                 "last_shot_state": None,           # "acquiring" / "acquired_ok" / "acquired_missing" / None
@@ -660,6 +672,12 @@ class ShotManager:
                     status["last_shot_state"] = "acquired_ok"
             else:
                 status["last_shot_state"] = None
+
+            if self.last_completed_shot is not None:
+                status["last_completed_shot_index"] = self.last_completed_shot.get("shot_index")
+                status["last_completed_shot_date"] = self.last_completed_shot.get("date_str")
+                trig = self.last_completed_shot.get("trigger_time")
+                status["last_completed_trigger_time"] = trig.isoformat(sep=" ") if isinstance(trig, datetime) else None
 
             return status
 
@@ -1019,6 +1037,7 @@ class ShotManager:
                 "date_str": date_str,
                 "shot_index": idx,
                 "missing_cameras": missing,
+                "trigger_time": trigger_time,
             }
 
             # First log: success / missing
@@ -1079,6 +1098,9 @@ class ShotManagerGUI:
         self.config = DEFAULT_CONFIG.clone()
         self.trigger_cam_vars = {}
         self.used_cam_vars = {}
+        self.manual_param_vars: dict[str, tk.StringVar] = {}
+        self.current_manual_params_shot: dict | None = None
+        self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
 
         self._build_gui()
 
@@ -1158,6 +1180,29 @@ class ShotManagerGUI:
         frm_cfg_file.pack(fill="x", padx=5, pady=5)
         ttk.Button(frm_cfg_file, text="Save config...", command=self._save_config).grid(row=0, column=0, padx=5, pady=5)
         ttk.Button(frm_cfg_file, text="Load config...", command=self._load_config).grid(row=0, column=1, padx=5, pady=5)
+
+        frm_manual_cfg = ttk.LabelFrame(self.root, text="Manual parameters setup")
+        frm_manual_cfg.pack(fill="x", padx=5, pady=5)
+        ttk.Button(frm_manual_cfg, text="Manual parameters...", command=self._open_manual_params_editor).grid(
+            row=0, column=0, padx=5, pady=5, sticky="w"
+        )
+        ttk.Label(frm_manual_cfg, text="Manual params CSV:").grid(row=0, column=1, sticky="e")
+        ttk.Entry(frm_manual_cfg, textvariable=self.var_manual_params_csv, width=50).grid(
+            row=0, column=2, sticky="we", padx=5
+        )
+        ttk.Button(frm_manual_cfg, text="Browse...", command=self._choose_manual_params_csv).grid(
+            row=0, column=3, padx=5, pady=5
+        )
+        frm_manual_cfg.columnconfigure(2, weight=1)
+
+        frm_manual_params = ttk.LabelFrame(self.root, text="Manual parameters (per shot)")
+        frm_manual_params.pack(fill="x", padx=5, pady=5)
+        self.lbl_manual_target = ttk.Label(frm_manual_params, text="No shot yet")
+        self.lbl_manual_target.grid(row=0, column=0, columnspan=3, sticky="w", padx=5, pady=(0, 5))
+        self.frm_manual_params_fields = ttk.Frame(frm_manual_params)
+        self.frm_manual_params_fields.grid(row=1, column=0, columnspan=3, sticky="we", padx=5, pady=5)
+        frm_manual_params.columnconfigure(1, weight=1)
+        self._rebuild_manual_param_fields()
 
         frm_motor = ttk.LabelFrame(self.root, text="Motor data")
         frm_motor.pack(fill="x", padx=5, pady=5)
@@ -1404,6 +1449,8 @@ class ShotManagerGUI:
         cfg.motor_initial_csv = self.var_motor_initial.get()
         cfg.motor_history_csv = self.var_motor_history.get()
         cfg.motor_positions_output = self.var_motor_output.get()
+        cfg.manual_params = list(self.config.manual_params)
+        cfg.manual_params_csv_path = self.var_manual_params_csv.get()
         return cfg
 
     def _recompute_motor_positions(self):
@@ -1665,6 +1712,207 @@ class ShotManagerGUI:
         top.wait_window()
         return result["folder"]
 
+    def _open_manual_params_editor(self):
+        top = tk.Toplevel(self.root)
+        top.title("Manual parameters")
+
+        params = list(self.config.manual_params)
+
+        lst = tk.Listbox(top, height=8, width=40)
+        lst.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+        top.grid_columnconfigure(0, weight=1)
+        top.grid_rowconfigure(0, weight=1)
+
+        def refresh_list():
+            lst.delete(0, tk.END)
+            for name in params:
+                lst.insert(tk.END, name)
+
+        name_var = tk.StringVar()
+
+        def on_add():
+            name = name_var.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Parameter name cannot be empty.")
+                return
+            if name in params:
+                messagebox.showerror("Error", "Parameter names must be unique.")
+                return
+            params.append(name)
+            name_var.set("")
+            refresh_list()
+
+        def on_remove():
+            selection = lst.curselection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a parameter to remove.")
+                return
+            idx = selection[0]
+            params.pop(idx)
+            refresh_list()
+
+        ttk.Label(top, text="New parameter name:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(top, textvariable=name_var, width=25).grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        ttk.Button(top, text="Add", command=on_add).grid(row=1, column=2, sticky="w", padx=5, pady=2)
+        ttk.Button(top, text="Remove selected", command=on_remove).grid(row=2, column=0, columnspan=3, sticky="w", padx=5, pady=5)
+
+        def on_ok():
+            clean_params = [p.strip() for p in params if p.strip()]
+            if len(clean_params) != len(set(clean_params)):
+                messagebox.showerror("Error", "Parameter names must be unique and non-empty.")
+                return
+            self.config.manual_params = clean_params
+            self._rebuild_manual_param_fields()
+            self._clear_manual_param_entries()
+            self.current_manual_params_shot = None
+            self._update_manual_target_label()
+            self._after_config_changed()
+            top.destroy()
+
+        ttk.Button(top, text="OK", command=on_ok).grid(row=3, column=1, sticky="e", padx=5, pady=5)
+        ttk.Button(top, text="Cancel", command=top.destroy).grid(row=3, column=2, sticky="w", padx=5, pady=5)
+
+        refresh_list()
+        top.grab_set()
+        top.wait_window()
+
+    def _rebuild_manual_param_fields(self):
+        for child in self.frm_manual_params_fields.winfo_children():
+            child.destroy()
+        self.manual_param_vars = {}
+
+        if not self.config.manual_params:
+            ttk.Label(self.frm_manual_params_fields, text="No manual parameters defined.").grid(
+                row=0, column=0, sticky="w", padx=5, pady=2
+            )
+            return
+
+        for idx, name in enumerate(self.config.manual_params):
+            ttk.Label(self.frm_manual_params_fields, text=f"{name}:").grid(row=idx, column=0, sticky="w", padx=5, pady=2)
+            var = tk.StringVar()
+            self.manual_param_vars[name] = var
+            ttk.Entry(self.frm_manual_params_fields, textvariable=var, width=50).grid(
+                row=idx, column=1, sticky="we", padx=5, pady=2
+            )
+        self.frm_manual_params_fields.columnconfigure(1, weight=1)
+
+    def _clear_manual_param_entries(self):
+        for var in self.manual_param_vars.values():
+            var.set("")
+
+    def _collect_manual_param_values(self) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for name, var in self.manual_param_vars.items():
+            values[name] = var.get()
+        return values
+
+    def _update_manual_target_label(self):
+        if self.current_manual_params_shot is None:
+            txt = "No shot yet"
+        else:
+            idx = self.current_manual_params_shot.get("shot_index")
+            txt = f"Editing parameters for shot: {idx:03d}"
+        self.lbl_manual_target.configure(text=txt)
+
+    def _choose_manual_params_csv(self):
+        path = filedialog.asksaveasfilename(
+            title="Choose output CSV for manual parameters by shot",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if path:
+            self.var_manual_params_csv.set(path)
+
+    def _get_manual_params_output_path(self) -> Path | None:
+        path_str = (self.var_manual_params_csv.get() or "").strip()
+        if not path_str:
+            return None
+        path = Path(path_str)
+        if not path.is_absolute():
+            root_dir = self.var_root.get().strip()
+            if root_dir:
+                path = Path(root_dir) / path
+        return path
+
+    def _submit_manual_params_for_shot(self, shot_info: dict | None):
+        if shot_info is None:
+            return
+        output_path = self._get_manual_params_output_path()
+        if output_path is None:
+            self._append_log("[WARNING] Manual parameters CSV path is not configured; values not saved.")
+            return
+
+        ensure_dir(output_path.parent)
+
+        header = ["shot_number", "trigger_time"] + list(self.config.manual_params)
+        values = self._collect_manual_param_values()
+        row = {
+            "shot_number": shot_info.get("shot_index"),
+            "trigger_time": shot_info.get("trigger_time") or "",
+        }
+        for name in self.config.manual_params:
+            row[name] = values.get(name, "")
+
+        file_exists = output_path.exists()
+        existing_header: list[str] | None = None
+        if file_exists:
+            try:
+                with output_path.open("r", newline="", encoding="utf-8") as f:
+                    reader = csv.reader(f)
+                    existing_header = next(reader)
+            except Exception as exc:
+                self._append_log(f"[WARNING] Could not read existing manual parameters CSV header: {exc}")
+
+        if existing_header and existing_header != header:
+            self._append_log(
+                "[WARNING] Manual parameters CSV header does not match current parameter list; values not recorded to avoid mixing formats."
+            )
+            return
+
+        try:
+            with output_path.open("a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=header)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(row)
+            self._append_log(
+                f"[INFO] Manual parameters recorded for shot {shot_info.get('shot_index'):03d} -> {output_path}"
+            )
+        except Exception as exc:
+            self._append_log(f"[WARNING] Failed to write manual parameters CSV: {exc}")
+
+    def _handle_manual_params_status(self, status: dict):
+        last_idx = status.get("last_completed_shot_index")
+        last_date = status.get("last_completed_shot_date")
+        last_trigger = status.get("last_completed_trigger_time")
+
+        if last_idx is None or last_date is None:
+            return
+
+        new_key = (last_date, last_idx)
+        current_key = self.current_manual_params_shot.get("key") if self.current_manual_params_shot else None
+
+        if current_key is None:
+            self.current_manual_params_shot = {
+                "key": new_key,
+                "shot_index": last_idx,
+                "date": last_date,
+                "trigger_time": last_trigger,
+            }
+            self._update_manual_target_label()
+            return
+
+        if current_key != new_key:
+            self._submit_manual_params_for_shot(self.current_manual_params_shot)
+            self._clear_manual_param_entries()
+            self.current_manual_params_shot = {
+                "key": new_key,
+                "shot_index": last_idx,
+                "date": last_date,
+                "trigger_time": last_trigger,
+            }
+            self._update_manual_target_label()
+
     def _after_config_changed(self):
         self._refresh_folder_labels()
         if self.manager:
@@ -1712,6 +1960,11 @@ class ShotManagerGUI:
         self.var_motor_initial.set(self.config.motor_initial_csv)
         self.var_motor_history.set(self.config.motor_history_csv)
         self.var_motor_output.set(self.config.motor_positions_output)
+        self.var_manual_params_csv.set(self.config.manual_params_csv_path or "")
+        self._rebuild_manual_param_fields()
+        self._clear_manual_param_entries()
+        self.current_manual_params_shot = None
+        self._update_manual_target_label()
         self._refresh_folder_labels()
         self.lbl_keyword.configure(text=self.config.global_trigger_keyword)
         self.lbl_timing.configure(
@@ -1749,6 +2002,7 @@ class ShotManagerGUI:
     def _update_status_labels(self):
         if self.manager:
             st = self.manager.get_status()
+            self._handle_manual_params_status(st)
             self.lbl_system.configure(text=st["system_status"])
             self.lbl_open.configure(text=str(st["open_shots_count"]))
 
@@ -1813,6 +2067,8 @@ class ShotManagerGUI:
             self.lbl_timing.configure(
                 text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
             )
+            self.current_manual_params_shot = None
+            self._update_manual_target_label()
 
         self.root.after(500, self._update_status_labels)
 
