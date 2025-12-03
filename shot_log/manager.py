@@ -38,7 +38,20 @@ class RawFileEventHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
-        self.manager.handle_new_raw_file(event.src_path)
+
+        path = Path(event.src_path)
+
+        # \U0001f525 DEBUG LOG : chaque fichier détecté par watchdog
+        try:
+            self.manager._log(
+                "INFO",
+                f"[WATCHDOG] New file detected: {path} | exists={path.exists()}"
+            )
+        except Exception as e:
+            print(f"[WATCHDOG DEBUG ERROR] {e}")
+
+        # Continue normal processing
+        self.manager.handle_new_raw_file(path)
 
     def on_moved(self, event):
         if event.is_directory:
@@ -889,17 +902,20 @@ class ShotManager:
     #  FILE HANDLING (watchdog)
     # =======================================================
 
-    def handle_new_raw_file(self, path_str: str):
+    def handle_new_raw_file(self, path_str: str | Path):
         with self.lock:
             if not self.running or self.paused:
                 return
 
         path = Path(path_str)
 
+        # \U0001f525 DEBUG : confirme que handle_new_raw_file est bien appelé
+        self._log("INFO", f"[MANAGER] Handling new RAW file: {path}")
+
         try:
             # NOTE: On Windows + cloud sync the filesystem creation time is unreliable.
             # For all shot logic we always rely on the filesystem Modified Time (mtime).
-            mtime = os.path.getmtime(path_str)  # always use Modified time
+            mtime = os.path.getmtime(path)  # always use Modified time
         except FileNotFoundError:
             return
 
