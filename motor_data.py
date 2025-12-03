@@ -20,7 +20,7 @@ class MotorEvent:
     """Represents a motor movement event parsed from the history CSV."""
 
     time: datetime
-    motor: str
+    motor: str  # Motor name (not the axis identifier)
     old_pos: float | None
     new_pos: float | None
 
@@ -112,12 +112,15 @@ def _parse_datetime(value: str, *, fallback_date: date | None = None) -> Optiona
     return None
 
 
-def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> Dict[str, float]:
+def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> tuple[Dict[str, float], Dict[str, str]]:
     """Parse a CSV containing initial motor positions.
 
-    The parser attempts to find a motor identifier column (name/axis/motor) and a
-    position column (position/pos). Lines with missing or invalid data are skipped
-    with a warning. Returns a mapping ``{motor_name: position}``.
+    The parser attempts to find both the motor name column (``name`` / ``motor``)
+    and the axis column (``axis``) so that a stable mapping ``axis -> motor`` can
+    be constructed. Lines with missing or invalid data are skipped with a warning.
+
+    Returns a tuple ``(initial_positions, axis_to_motor)`` where ``initial_positions``
+    is ``{motor_name: position}``.
     """
 
     if not path.exists():
@@ -125,22 +128,31 @@ def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> Dict[
 
     dialect = _detect_dialect(path)
     positions: Dict[str, float] = {}
+    axis_to_motor: Dict[str, str] = {}
 
     with path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, dialect=dialect)
         if not reader.fieldnames:
             raise ValueError("Initial positions CSV has no header")
-        motor_col = _pick_column(reader.fieldnames, ["motor", "name", "axis"])
+        motor_col = _pick_column(reader.fieldnames, ["motor", "name", "motor_name"])
+        axis_col = _pick_column(reader.fieldnames, ["axis", "axis_name"])
         pos_col = _pick_column(reader.fieldnames, ["position", "pos", "value"])
         if motor_col is None or pos_col is None:
             raise ValueError(
                 "Could not find motor/position columns in initial positions CSV."
+            )
+        if axis_col is None:
+            _log_message(
+                logger,
+                "WARNING",
+                "Initial positions CSV is missing an axis column; motor history will not be mapped to names.",
             )
         for row_idx, row in enumerate(reader, start=2):
             motor = (row.get(motor_col) or "").strip()
             if not motor:
                 _log_message(logger, "WARNING", f"Skipping row {row_idx}: missing motor name")
                 continue
+            axis = (row.get(axis_col) or "").strip() if axis_col else ""
             pos = _parse_float(row.get(pos_col, ""))
             if pos is None:
                 _log_message(
@@ -150,11 +162,25 @@ def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> Dict[
                 )
                 continue
             positions[motor] = pos
-    return positions
+            if axis:
+                existing = axis_to_motor.get(axis)
+                if existing and existing != motor:
+                    _log_message(
+                        logger,
+                        "WARNING",
+                        f"Axis '{axis}' already mapped to motor '{existing}', ignoring duplicate motor '{motor}'",
+                    )
+                else:
+                    axis_to_motor[axis] = motor
+    return positions, axis_to_motor
 
 
 def parse_motor_history(
-    path: Path, logger: LoggerFn | None = None, *, fallback_date: date | None = None
+    path: Path,
+    logger: LoggerFn | None = None,
+    *,
+    axis_to_motor: Dict[str, str] | None = None,
+    fallback_date: date | None = None,
 ) -> List[MotorEvent]:
     """Parse the motor movement history CSV.
 
@@ -180,9 +206,9 @@ def parse_motor_history(
                 "Could not find required columns (time, motor, new position) in motor history CSV."
             )
         for row_idx, row in enumerate(reader, start=2):
-            motor = (row.get(motor_col) or "").strip()
+            axis_or_motor = (row.get(motor_col) or "").strip()
             raw_time = (row.get(time_col) or "").strip()
-            if not motor or not raw_time:
+            if not axis_or_motor or not raw_time:
                 _log_message(
                     logger,
                     "WARNING",
@@ -197,9 +223,20 @@ def parse_motor_history(
                     f"Skipping row {row_idx}: could not parse timestamp '{raw_time}'",
                 )
                 continue
+            motor_name = axis_or_motor
+            if axis_to_motor is not None:
+                motor_name = axis_to_motor.get(axis_or_motor, "")
+                if not motor_name:
+                    _log_message(
+                        logger,
+                        "WARNING",
+                        f"Skipping row {row_idx}: unknown axis '{axis_or_motor}'",
+                    )
+                    continue
+
             old_pos = _parse_float(row.get(old_col, "")) if old_col else None
             new_pos = _parse_float(row.get(new_col, ""))
-            events.append(MotorEvent(time=dt, motor=motor, old_pos=old_pos, new_pos=new_pos))
+            events.append(MotorEvent(time=dt, motor=motor_name, old_pos=old_pos, new_pos=new_pos))
     events.sort(key=lambda e: e.time)
     return events
 
