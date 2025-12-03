@@ -999,7 +999,7 @@ class ShotManagerGUI:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        param_names = list(self.manual_confirmed_values.keys())
+        param_names = list(self.config.manual_params)
         fieldnames = ["date", "shot", "trigger_time"] + param_names
 
         row = {
@@ -1038,6 +1038,8 @@ class ShotManagerGUI:
             self._reset_manual_state()
             return
 
+        manual_target_key = (self.manual_target_date, self.manual_target_index)
+
         if self.manual_target_date is None or self.manual_target_index is None:
             self.manual_target_date = last_completed_date
             self.manual_target_index = last_completed_idx
@@ -1045,19 +1047,15 @@ class ShotManagerGUI:
             self.manual_last_written_key = None
             self.manual_confirmed_values = self._build_empty_manual_values()
             self.manual_enabled = True
-            self._update_manual_target_label()
-            self._update_manual_confirm_display()
             self._update_manual_confirm_state()
+            self._update_manual_confirm_display()
             return
 
-        if (last_completed_date, last_completed_idx) == (
-            self.manual_target_date,
-            self.manual_target_index,
-        ):
+        if last_key == manual_target_key:
             self.manual_target_trigger_time = last_completed_trig
             self.manual_enabled = True
-            self._update_manual_target_label()
             self._update_manual_confirm_state()
+            self._update_manual_confirm_display()
             return
 
         trigger_str = (
@@ -1073,8 +1071,8 @@ class ShotManagerGUI:
         self.manual_confirmed_values = self._build_empty_manual_values()
         self.manual_enabled = True
 
-        self._update_manual_confirm_display()
         self._update_manual_confirm_state()
+        self._update_manual_confirm_display()
 
     def _flush_manual_params_on_stop(self):
         if self.manual_target_date is None or self.manual_target_index is None:
