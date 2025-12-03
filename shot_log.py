@@ -141,6 +141,7 @@ class ShotManager:
         self._setup_logging()
         self._ensure_expected_cameras(log_prefix="Initial expected cameras")
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
+        self.log_keyword_config()
         self._load_state()
         self._resync_last_shot_from_clean_today()
 
@@ -652,6 +653,7 @@ class ShotManager:
             "INFO",
             f"Updated keyword settings: keyword='{global_keyword}', apply_to_all={apply_global_to_all}",
         )
+        self.log_keyword_config()
 
     def update_expected_cameras(self, cameras: list[str]):
         with self.lock:
@@ -675,6 +677,7 @@ class ShotManager:
             f"Configuration updated for running manager. Expected cameras: {ensured_expected}",
         )
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
+        self.log_keyword_config()
 
     def set_manual_date(self, date_str: str | None):
         """
@@ -722,6 +725,12 @@ class ShotManager:
                 if isinstance(trig, datetime):
                     trigger_time = trig
         return trigger_time
+
+    def log_keyword_config(self, cfg: ShotLogConfig | None = None):
+        """Log the effective keyword configuration (global + per folder)."""
+        config_to_log = cfg or self.config
+        for line in config_to_log.keyword_log_lines():
+            self._log("INFO", line)
 
     # ---------------------------
     # STATUS FOR GUI
@@ -855,6 +864,8 @@ class ShotManager:
         path = Path(path_str)
 
         try:
+            # NOTE: On Windows + cloud sync the filesystem creation time is unreliable.
+            # For all shot logic we always rely on the filesystem Modified Time (mtime).
             mtime = os.path.getmtime(path_str)  # always use Modified time
         except FileNotFoundError:
             return
@@ -1829,7 +1840,7 @@ class ShotManagerGUI:
             self.manager.update_keyword_settings(kw, self.config.apply_global_keyword_to_all)
         else:
             if not apply_only_if_manager:
-                self._append_log(f"[INFO] Keyword will be used at start: '{kw}'")
+                self._log_keyword_configuration()
 
     def _set_next_shot(self):
         val = self.var_next_shot.get().strip()
@@ -2311,6 +2322,8 @@ class ShotManagerGUI:
         self._refresh_folder_labels()
         if self.manager:
             self.manager.update_config(self._build_runtime_config())
+        else:
+            self._log_keyword_configuration()
 
     def _save_config(self):
         cfg = self._build_runtime_config()
@@ -2366,6 +2379,14 @@ class ShotManagerGUI:
             self._append_log(f"[INFO] Configuration loaded from {path}")
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to load configuration: {exc}")
+
+    def _log_keyword_configuration(self):
+        cfg = self._build_runtime_config()
+        if self.manager:
+            self.manager.log_keyword_config(cfg)
+        else:
+            for line in cfg.keyword_log_lines():
+                self._append_log(f"[INFO] {line}")
 
     def _refresh_from_config(self):
         self.var_window.set(str(self.config.full_window_s))
