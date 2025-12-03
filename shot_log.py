@@ -1290,6 +1290,7 @@ class ShotManagerGUI:
         self.current_manual_shot: int | None = None
         self.current_manual_shot_date: str | None = None
         self.current_manual_trigger_time: str | None = None
+        self.manual_next_shot_hint: int | None = None
         self.confirmed_manual_values: dict[str, str] = {}
         self.manual_values_pending_for_current_shot = False
         self.manual_confirm_labels: dict[str, ttk.Label] = {}
@@ -2171,10 +2172,15 @@ class ShotManagerGUI:
 
     def _update_manual_confirm_display(self):
         if self.current_manual_shot is None:
-            self.lbl_manual_target.configure(text="Manual parameters – no shot yet")
+            if self.manual_next_shot_hint is not None:
+                self.lbl_manual_target.configure(
+                    text=f"Manual parameters for shot {self.manual_next_shot_hint:03d}"
+                )
+            else:
+                self.lbl_manual_target.configure(text="Manual parameters – no shot yet")
         else:
             self.lbl_manual_target.configure(
-                text=f"Manual parameters for shot {self.current_manual_shot}"
+                text=f"Manual parameters for shot {self.current_manual_shot:03d}"
             )
 
         for name, lbl in self.manual_confirm_labels.items():
@@ -2206,7 +2212,6 @@ class ShotManagerGUI:
             )
             return
         self.confirmed_manual_values = self._collect_manual_param_values()
-        self.manual_values_pending_for_current_shot = True
         self._update_manual_confirm_display()
 
     def _choose_manual_params_csv(self):
@@ -2232,6 +2237,12 @@ class ShotManagerGUI:
     def _write_manual_params_for_shot(
         self, shot_number: int, trigger_time: str | None, values: dict[str, str]
     ):
+        if shot_number is None or shot_number < 1:
+            self._append_log(
+                f"[WARNING] Attempted to write manual parameters for invalid shot index ({shot_number}); skipping."
+            )
+            return
+
         output_path = self._get_manual_params_output_path()
         if output_path is None:
             self._append_log("[WARNING] Manual parameters CSV path is not configured; values not saved.")
@@ -2277,17 +2288,28 @@ class ShotManagerGUI:
             self._append_log(f"[WARNING] Failed to write manual parameters CSV: {exc}")
 
     def _handle_manual_params_status(self, status: dict):
-        last_started_idx = status.get("last_shot_index")
-        last_started_date = status.get("last_shot_date")
+        current_shot_state = status.get("current_shot_state")
+        current_shot_idx = status.get("current_shot_index")
+        current_shot_date = status.get("current_shot_date")
+        next_shot_number = status.get("next_shot_number")
+        if isinstance(next_shot_number, int) and next_shot_number >= 1:
+            self.manual_next_shot_hint = next_shot_number
+        else:
+            self.manual_next_shot_hint = None
+
+        if (
+            current_shot_state == "acquiring"
+            and current_shot_idx is not None
+            and current_shot_date
+        ):
+            current_key = (current_shot_date, current_shot_idx)
+        else:
+            current_key = None
+
         last_completed_idx = status.get("last_completed_shot_index")
         last_completed_date = status.get("last_completed_shot_date")
         last_completed_trigger = status.get("last_completed_trigger_time")
 
-        current_key = (
-            (last_started_date, last_started_idx)
-            if last_started_idx is not None and last_started_date is not None
-            else None
-        )
         tracked_key = (
             (self.current_manual_shot_date, self.current_manual_shot)
             if self.current_manual_shot is not None and self.current_manual_shot_date is not None
@@ -2302,26 +2324,31 @@ class ShotManagerGUI:
             self.current_manual_trigger_time = last_completed_trigger
 
         if current_key is None:
-            self._reset_manual_tracking()
+            if tracked_key is None:
+                self._reset_manual_tracking()
+            else:
+                self._update_manual_confirm_display()
             return
 
         if tracked_key is None:
-            self._start_manual_tracking_for_shot(last_started_idx, last_started_date)
+            if current_shot_idx is not None and current_shot_idx >= 1:
+                self._start_manual_tracking_for_shot(current_shot_idx, current_shot_date)
             return
 
         if current_key != tracked_key:
-            if self.manual_values_pending_for_current_shot and self.current_manual_shot is not None:
+            if self.current_manual_shot is not None:
                 values_to_write = dict(self.confirmed_manual_values)
                 self._write_manual_params_for_shot(
                     self.current_manual_shot, self.current_manual_trigger_time, values_to_write
                 )
                 self.manual_values_pending_for_current_shot = False
-            self._start_manual_tracking_for_shot(last_started_idx, last_started_date)
+            if current_shot_idx is not None and current_shot_idx >= 1:
+                self._start_manual_tracking_for_shot(current_shot_idx, current_shot_date)
         else:
             self._update_manual_confirm_display()
 
     def _flush_manual_params_on_stop(self):
-        if self.current_manual_shot is not None and self.manual_values_pending_for_current_shot:
+        if self.current_manual_shot is not None:
             values_to_write = dict(self.confirmed_manual_values)
             self._write_manual_params_for_shot(
                 self.current_manual_shot, self.current_manual_trigger_time, values_to_write
