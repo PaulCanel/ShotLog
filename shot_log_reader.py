@@ -37,8 +37,14 @@ class LogShotAnalyzer:
         re_new_shot = re.compile(
             r"\*\*\* New shot detected: date=(\d{8}), shot=(\d+), camera=([A-Za-z0-9_]+), ref_time=(\d{2}:\d{2}:\d{2}) \*\*\*"
         )
+        re_shot_acquired_missing_expected = re.compile(
+            r"Shot (\d+) \((\d{8})\) acquired.*?expected=\[(.*)\].*missing cameras: \[(.*)\]"
+        )
         re_shot_acquired_missing = re.compile(
             r"Shot (\d+) \((\d{8})\) acquired.*missing cameras: \[(.*)\]"
+        )
+        re_shot_acquired_ok_expected = re.compile(
+            r"Shot (\d+) \((\d{8})\) acquired successfully, expected=\[(.*)\], all cameras present\."
         )
         re_shot_acquired_ok = re.compile(
             r"Shot (\d+) \((\d{8})\) acquired successfully, all cameras present\."
@@ -132,6 +138,23 @@ class LogShotAnalyzer:
                     continue
 
                 # 5) Shot avec missing cameras
+                m = re_shot_acquired_missing_expected.search(line)
+                if m:
+                    shot_idx = int(m.group(1))
+                    date_str = m.group(2)
+                    expected_text = m.group(3)
+                    missing_text = m.group(4)
+                    expected_cams = set(self._parse_list_of_names(expected_text))
+                    missing_cams = set(self._parse_list_of_names(missing_text))
+
+                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                    if shot is not None:
+                        shot["expected_cams"] = expected_cams
+                        shot["missing_cams"] = missing_cams
+                        self.all_expected_cameras.update(expected_cams)
+                    self.open_shots.pop((date_str, shot_idx), None)
+                    continue
+
                 m = re_shot_acquired_missing.search(line)
                 if m:
                     shot_idx = int(m.group(1))
@@ -147,6 +170,20 @@ class LogShotAnalyzer:
                     continue
 
                 # 6) Shot sans missing (tout OK)
+                m = re_shot_acquired_ok_expected.search(line)
+                if m:
+                    shot_idx = int(m.group(1))
+                    date_str = m.group(2)
+                    expected_text = m.group(3)
+                    expected_cams = set(self._parse_list_of_names(expected_text))
+                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                    if shot is not None:
+                        shot["expected_cams"] = expected_cams
+                        shot["missing_cams"] = set()
+                        self.all_expected_cameras.update(expected_cams)
+                    self.open_shots.pop((date_str, shot_idx), None)
+                    continue
+
                 m = re_shot_acquired_ok.search(line)
                 if m:
                     shot_idx = int(m.group(1))

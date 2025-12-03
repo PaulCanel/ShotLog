@@ -292,10 +292,12 @@ class ShotManager:
 
         try:
             self._log("INFO", "Loading motor CSV files...")
-            initial_positions = parse_initial_positions(
+            initial_positions, axis_to_motor = parse_initial_positions(
                 self.motor_initial_path, logger=self._log
             )
-            events = parse_motor_history(self.motor_history_path, logger=self._log)
+            events = parse_motor_history(
+                self.motor_history_path, logger=self._log, axis_to_motor=axis_to_motor
+            )
             self.motor_state_manager = MotorStateManager(initial_positions, events)
             self._motor_sources_mtime = mtimes
             self._log(
@@ -1128,12 +1130,18 @@ class ShotManager:
             # First log: success / missing
             if missing:
                 self.system_status = "ERROR"
-                self._log("WARNING", f"Shot {idx:03d} ({date_str}) acquired (timeout or complete), "
-                                      f"but missing cameras: {missing}")
+                self._log(
+                    "WARNING",
+                    f"Shot {idx:03d} ({date_str}) acquired (timeout or complete), "
+                    f"expected={expected}, missing cameras: {missing}",
+                )
             else:
                 if self.system_status not in ["PAUSED"]:
                     self.system_status = "RUNNING"
-                self._log("INFO", f"Shot {idx:03d} ({date_str}) acquired successfully, all cameras present.")
+                self._log(
+                    "INFO",
+                    f"Shot {idx:03d} ({date_str}) acquired successfully, expected={expected}, all cameras present.",
+                )
 
             # Second log: detailed timing info
             self._log("INFO", timing_msg)
