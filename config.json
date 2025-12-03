@@ -9,7 +9,7 @@
   "full_window_s": 30.0,
   "timeout_s": 65.0,
   "global_trigger_keyword": "2025",
-  "apply_global_keyword_to_all": true,
+  "apply_global_keyword_to_all": false,
   "test_keywords": [
     "test",
     "align"
@@ -18,11 +18,14 @@
   "log_dir": "rename_log",
   "check_interval_s": 0.5,
   "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
-  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/istoric_2025-12-02.csv",
+  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/motors/istoric_2025-12-02.csv",
   "motor_positions_output": "motor_positions_by_shot.csv",
-  "manual_params": [],
+  "manual_params": [
+    "Laser energy",
+    "jet 2"
+  ],
   "manual_params_csv_path": "manual_params_by_shot.csv",
-  "manual_date_override": "20251202",
+  "manual_date_override": null,
   "folders": [
     {
       "name": "Lanex1",
@@ -30,8 +33,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -41,8 +44,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -52,8 +55,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -63,8 +66,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -74,8 +77,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -85,8 +88,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     },
@@ -96,8 +99,8 @@
       "trigger": true,
       "file_specs": [
         {
-          "keyword": "",
-          "extension": ".tif"
+          "keyword": "2025",
+          "extension": ".tiff"
         }
       ]
     }
