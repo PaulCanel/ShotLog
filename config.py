@@ -25,6 +25,10 @@ class FolderFileSpec:
     keyword: str = ""
     extension: str = ""
 
+    @property
+    def normalized_extension(self) -> str:
+        return _normalize_extension(self.extension)
+
     def matches(self, filename_lower: str, *, global_keyword: str, apply_global_keyword: bool) -> bool:
         """
         Return True if the filename matches this spec. The check is case
@@ -194,6 +198,47 @@ class ShotLogConfig:
             global_keyword=self.global_trigger_keyword,
             apply_global_keyword=self.apply_global_keyword_to_all,
         )
+
+    # ---------------------------------
+    # Logging helpers
+    # ---------------------------------
+    def keyword_log_lines(self) -> List[str]:
+        """
+        Return human-readable log lines describing the effective keyword
+        configuration, including per-folder specs.
+        """
+        lines: List[str] = []
+        use_global = self.apply_global_keyword_to_all and bool(self.global_trigger_keyword)
+        lines.append(
+            f"Global keyword = '{self.global_trigger_keyword}', apply_to_all = {self.apply_global_keyword_to_all}"
+        )
+        for folder_name in sorted(self.folders.keys()):
+            folder = self.folders[folder_name]
+            lines.append(
+                f"Folder {folder.name} – expected={folder.expected}, trigger={folder.trigger}"
+            )
+            if not folder.file_specs:
+                lines.append("  (no file specs configured)")
+                continue
+
+            for idx, spec in enumerate(folder.file_specs, start=1):
+                ext = spec.normalized_extension
+                ext_desc = f"ext='{ext}'" if ext else "ext='' (no extension filter)"
+                if use_global:
+                    if spec.keyword:
+                        kw_desc = (
+                            f"keyword='{spec.keyword}' + global='{self.global_trigger_keyword}' enforced"
+                        )
+                    else:
+                        kw_desc = f"keyword='{self.global_trigger_keyword}' (global)"
+                else:
+                    if spec.keyword:
+                        kw_desc = f"keyword='{spec.keyword}'"
+                    else:
+                        kw_desc = "keyword='' (empty → matches all filenames)"
+                lines.append(f"  File spec {idx}: {kw_desc}, {ext_desc}")
+
+        return lines
 
 
 def default_folders() -> Dict[str, FolderConfig]:

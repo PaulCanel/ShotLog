@@ -24,6 +24,8 @@
   * typiquement, les mises à jour ne sont poussées que **toutes les ~30 secondes**,
   * donc les images d’un même shot peuvent arriver sur le PC central dans un ordre et à des instants très variés.
 * La seule information temporelle fiable pour regrouper les images d’un même shot est donc le **Modified Time** conservé par le système de fichiers (copié dans `dt` dans le code).
+* **Note :** la "Date de création" exposée par Windows ou par le cloud n’est **pas fiable** (elle peut changer lors des copies
+  ou resynchronisations). Toute la logique du code se base **uniquement** sur le Modified Time (`mtime`).
 
 ### 1.3. Rythme des shots
 
