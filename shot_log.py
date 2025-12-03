@@ -120,6 +120,7 @@ class ShotManager:
         # Shots
         self.open_shots = []  # list of shot dicts
         self.last_shot_index_by_date = {}  # { "YYYYMMDD": last_index }
+        self.last_shot_trigger_time_by_date: dict[str, datetime] = {}
         self.last_completed_shot = None    # {"date_str", "shot_index", "missing_cameras"}
 
         # Avoid reprocessing
@@ -235,6 +236,12 @@ class ShotManager:
                 state = json.load(f)
 
             self.last_shot_index_by_date = state.get("last_shot_index_by_date", {})
+            trig_map = state.get("last_shot_trigger_time_by_date", {})
+            for k, v in trig_map.items():
+                try:
+                    self.last_shot_trigger_time_by_date[k] = datetime.fromisoformat(v)
+                except Exception:
+                    continue
             self.processed_files = state.get("processed_files", {})
             self.system_status = state.get("system_status", "IDLE")
             manual_date = state.get("manual_date_str")
@@ -256,6 +263,9 @@ class ShotManager:
     def _save_state(self):
         state = {
             "last_shot_index_by_date": self.last_shot_index_by_date,
+            "last_shot_trigger_time_by_date": {
+                k: v.isoformat() for k, v in self.last_shot_trigger_time_by_date.items()
+            },
             "processed_files": self.processed_files,
             "system_status": self.system_status,
             "manual_date_str": self.manual_date_str,
@@ -459,6 +469,7 @@ class ShotManager:
         """
         per_shot_cams = {}
         expected = self.config.expected_folders
+        latest_mtime_by_shot: dict[int, float] = {}
 
         for cam in expected:
             cam_dir = self.clean_root / cam / date_str
@@ -469,8 +480,14 @@ class ShotManager:
                 if idx is None:
                     continue
                 per_shot_cams.setdefault(idx, set()).add(cam)
+                try:
+                    latest = latest_mtime_by_shot.get(idx, 0.0)
+                    mtime = os.path.getmtime(f)
+                    latest_mtime_by_shot[idx] = max(latest, mtime)
+                except FileNotFoundError:
+                    continue
 
-        return per_shot_cams
+        return per_shot_cams, latest_mtime_by_shot
 
     def _resync_last_shot_from_clean_today(self):
         """
@@ -479,21 +496,38 @@ class ShotManager:
         it's missing cameras.
         """
         date_str = self._get_active_date_str()
-        per_shot_cams = self._scan_clean_shots_for_date(date_str)
+        per_shot_cams, latest_mtime_by_shot = self._scan_clean_shots_for_date(date_str)
         if not per_shot_cams:
+            with self.lock:
+                if self.last_completed_shot and self.last_completed_shot.get("date_str") != date_str:
+                    self.last_completed_shot = None
             return
+
+        if self.last_completed_shot and self.last_completed_shot.get("date_str") != date_str:
+            self.last_completed_shot = None
+
+        self.last_shot_index_by_date.setdefault(date_str, 0)
 
         last_idx = max(per_shot_cams.keys())
         cams_present = per_shot_cams[last_idx]
         missing = [c for c in self.config.expected_folders if c not in cams_present]
 
+        trigger_time = None
+        mtime_val = latest_mtime_by_shot.get(last_idx)
+        if mtime_val is not None:
+            trigger_time = datetime.fromtimestamp(mtime_val)
+
         self.last_shot_index_by_date[date_str] = max(
             self.last_shot_index_by_date.get(date_str, 0), last_idx
         )
+        if trigger_time:
+            self.last_shot_trigger_time_by_date[date_str] = trigger_time
+
         self.last_completed_shot = {
             "date_str": date_str,
             "shot_index": last_idx,
             "missing_cameras": missing,
+            "trigger_time": trigger_time,
         }
 
         if missing:
@@ -644,6 +678,7 @@ class ShotManager:
             self._log("INFO", "Manual date cleared, using system today().")
         else:
             self._log("INFO", f"Manual date set to {date_str}.")
+        self._resync_last_shot_from_clean_today()
         self._save_state()
 
     def set_next_shot_number(self, k: int, date_str: str | None = None):
@@ -659,7 +694,7 @@ class ShotManager:
     def check_next_shot_conflicts(self, proposed_k: int, date_str: str | None = None):
         if date_str is None:
             date_str = self._get_active_date_str()
-        per_shot_cams = self._scan_clean_shots_for_date(date_str)
+        per_shot_cams, _ = self._scan_clean_shots_for_date(date_str)
         indices = sorted(per_shot_cams.keys())
         same = proposed_k in indices
         higher = [i for i in indices if i > proposed_k]
@@ -668,6 +703,15 @@ class ShotManager:
     def get_next_shot_number_today(self):
         date_str = self._get_active_date_str()
         return self.last_shot_index_by_date.get(date_str, 0) + 1
+
+    def _get_last_trigger_time_for_date(self, date_str: str) -> datetime | None:
+        trigger_time = self.last_shot_trigger_time_by_date.get(date_str)
+        if trigger_time is None and self.last_completed_shot:
+            if self.last_completed_shot.get("date_str") == date_str:
+                trig = self.last_completed_shot.get("trigger_time")
+                if isinstance(trig, datetime):
+                    trigger_time = trig
+        return trigger_time
 
     # ---------------------------
     # STATUS FOR GUI
@@ -934,6 +978,14 @@ class ShotManager:
                 )
             else:
                 # 2) No suitable shot found -> create a NEW shot
+                last_trigger_dt = self._get_last_trigger_time_for_date(date_str)
+                if last_trigger_dt and dt <= last_trigger_dt:
+                    self._log(
+                        "INFO",
+                        f"Ignoring late trigger file {info['path']} (mtime {dt}) older than "
+                        f"last acquired shot at {last_trigger_dt}",
+                    )
+                    return
                 last_idx = self.last_shot_index_by_date.get(date_str, 0)
                 new_idx = last_idx + 1
                 self.last_shot_index_by_date[date_str] = new_idx
@@ -1120,6 +1172,18 @@ class ShotManager:
         )
 
         with self.lock:
+            self.last_shot_index_by_date[date_str] = max(
+                self.last_shot_index_by_date.get(date_str, 0), idx
+            )
+            if isinstance(trigger_time, datetime):
+                self.last_shot_trigger_time_by_date[date_str] = max(
+                    self.last_shot_trigger_time_by_date.get(date_str, trigger_time), trigger_time
+                )
+            elif isinstance(max_dt, datetime):
+                self.last_shot_trigger_time_by_date[date_str] = max(
+                    self.last_shot_trigger_time_by_date.get(date_str, max_dt), max_dt
+                )
+
             self.last_completed_shot = {
                 "date_str": date_str,
                 "shot_index": idx,
