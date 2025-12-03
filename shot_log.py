@@ -116,6 +116,7 @@ class ShotManager:
         self.observer = None
         self.lock = threading.Lock()
         self.manual_date_str: str | None = manual_date_str
+        self.last_seen_date_str: str | None = None
 
         # Shots
         self.open_shots = []  # list of shot dicts
@@ -184,11 +185,16 @@ class ShotManager:
         - resync from CLEAN
         - next shot number, etc.
 
-        If a manual date is set, return it. Otherwise, return today's date.
+        Priority order:
+        1) manual date override (if set)
+        2) last RAW date observed from actual files
+        3) system date (fallback only if nothing was seen yet)
         """
         manual = getattr(self, "manual_date_str", None)
         if manual:
             return manual
+        if self.last_seen_date_str:
+            return self.last_seen_date_str
         return datetime.now().strftime("%Y%m%d")
 
     # ---------------------------
@@ -245,6 +251,7 @@ class ShotManager:
             self.processed_files = state.get("processed_files", {})
             self.system_status = state.get("system_status", "IDLE")
             manual_date = state.get("manual_date_str")
+            self.last_seen_date_str = state.get("last_seen_date_str")
             if manual_date and self.manual_date_str is None:
                 try:
                     datetime.strptime(manual_date, "%Y%m%d")
@@ -269,6 +276,7 @@ class ShotManager:
             "processed_files": self.processed_files,
             "system_status": self.system_status,
             "manual_date_str": self.manual_date_str,
+            "last_seen_date_str": self.last_seen_date_str,
         }
         try:
             with open(self.state_file, "w", encoding="utf-8") as f:
@@ -721,11 +729,8 @@ class ShotManager:
         with self.lock:
             active_date = self._get_active_date_str()
             open_count = len(self.open_shots)
-            last_date_idx = None
-            if self.last_shot_index_by_date:
-                last_date = max(self.last_shot_index_by_date.keys())
-                last_idx = self.last_shot_index_by_date[last_date]
-                last_date_idx = (last_date, last_idx)
+            last_idx = self.last_shot_index_by_date.get(active_date)
+            last_date_idx = (active_date, last_idx) if last_idx is not None else None
 
             # Collecting shots sorted by (date_str, shot_index)
             collecting = sorted(
@@ -863,7 +868,6 @@ class ShotManager:
             if old_mtime is not None and abs(old_mtime - mtime) < 1e-6:
                 return
             self.processed_files[path_str] = mtime
-        self._save_state()
 
         try:
             rel = path.relative_to(self.raw_root)
@@ -880,6 +884,7 @@ class ShotManager:
             self._log("INFO", f"Ignoring file from unknown folder '{main_folder}': {path}")
             return
 
+        date_from_path = rel.parts[1] if len(rel.parts) >= 2 else None
         filename = rel.parts[-1]
         filename_lower = filename.lower()
 
@@ -891,7 +896,9 @@ class ShotManager:
             return
 
         dt = datetime.fromtimestamp(mtime)
-        date_str, time_str = format_dt_for_name(dt)
+        raw_date_str = date_from_path if date_from_path and re.match(r"^\d{8}$", date_from_path) else None
+        date_str = raw_date_str or format_dt_for_name(dt)[0]
+        time_str = format_dt_for_name(dt)[1]
 
         info = {
             "camera": main_folder,
@@ -904,6 +911,8 @@ class ShotManager:
         # Record this file in files_by_date
         with self.lock:
             self.files_by_date.setdefault(date_str, []).append(info)
+            self.last_seen_date_str = date_str
+        self._save_state()
 
         # Trigger or not?
         if self._is_trigger_file(main_folder, filename_lower):
@@ -935,7 +944,8 @@ class ShotManager:
 
         camera = info["camera"]
         dt = info["dt"]          # reference mtime of this trigger
-        date_str = info["date_str"]
+        file_date_str = info["date_str"]
+        date_str = self._get_active_date_str()
 
         full_window = self.config.full_window_s
         half_window = full_window / 2.0
@@ -991,7 +1001,7 @@ class ShotManager:
                 self.last_shot_index_by_date[date_str] = new_idx
 
                 images_by_camera = {}
-                date_files = self.files_by_date.get(date_str, [])
+                date_files = self.files_by_date.get(file_date_str, [])
 
                 # Collect all files in the full time window around this trigger
                 for finfo in date_files:
@@ -1045,11 +1055,19 @@ class ShotManager:
         camera = info["camera"]
         dt = info["dt"]
         date_str = info["date_str"]
+        active_date = self._get_active_date_str()
 
         shot_to_check = None
 
         with self.lock:
             if info["path"] in self.assigned_files:
+                return
+
+            if date_str != active_date:
+                self._log(
+                    "INFO",
+                    f"Ignoring non-trigger from different active date {date_str} (active={active_date}): {info['path']}",
+                )
                 return
 
             candidate = None
@@ -1176,9 +1194,7 @@ class ShotManager:
                 self.last_shot_index_by_date.get(date_str, 0), idx
             )
             if isinstance(trigger_time, datetime):
-                self.last_shot_trigger_time_by_date[date_str] = max(
-                    self.last_shot_trigger_time_by_date.get(date_str, trigger_time), trigger_time
-                )
+                self.last_shot_trigger_time_by_date[date_str] = trigger_time
             elif isinstance(max_dt, datetime):
                 self.last_shot_trigger_time_by_date[date_str] = max(
                     self.last_shot_trigger_time_by_date.get(date_str, max_dt), max_dt
