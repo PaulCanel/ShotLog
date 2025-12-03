@@ -91,7 +91,9 @@ class ShotManager:
     Multiple shots can acquire in parallel.
     """
 
-    def __init__(self, root_path: str, config: ShotLogConfig, gui_queue: queue.Queue):
+    def __init__(
+        self, root_path: str, config: ShotLogConfig, gui_queue: queue.Queue, manual_date_str: str | None = None
+    ):
         self.root_path = Path(root_path).resolve()
         self.config = config.clone()
         self.gui_queue = gui_queue
@@ -113,6 +115,7 @@ class ShotManager:
         self.worker_thread = None
         self.observer = None
         self.lock = threading.Lock()
+        self.manual_date_str: str | None = manual_date_str
 
         # Shots
         self.open_shots = []  # list of shot dicts
@@ -156,6 +159,20 @@ class ShotManager:
         self.manual_params_csv_path = self._resolve_path(
             self.config.manual_params_csv_path, default="manual_params_by_shot.csv"
         )
+
+    def _get_active_date_str(self) -> str:
+        """
+        Returns the date string YYYYMMDD used as 'current date' for:
+        - last shot index management
+        - resync from CLEAN
+        - next shot number, etc.
+
+        If a manual date is set, return it. Otherwise, return today's date.
+        """
+        manual = getattr(self, "manual_date_str", None)
+        if manual:
+            return manual
+        return datetime.now().strftime("%Y%m%d")
 
     # ---------------------------
     # LOGGING
@@ -204,6 +221,17 @@ class ShotManager:
             self.last_shot_index_by_date = state.get("last_shot_index_by_date", {})
             self.processed_files = state.get("processed_files", {})
             self.system_status = state.get("system_status", "IDLE")
+            manual_date = state.get("manual_date_str")
+            if manual_date and self.manual_date_str is None:
+                try:
+                    datetime.strptime(manual_date, "%Y%m%d")
+                    self.manual_date_str = manual_date
+                except ValueError:
+                    self.manual_date_str = None
+                    self._log(
+                        "WARNING",
+                        f"Ignored invalid manual date in state file: {manual_date}",
+                    )
 
             self._log("INFO", f"Loaded state from {self.state_file}")
         except Exception as e:
@@ -214,6 +242,7 @@ class ShotManager:
             "last_shot_index_by_date": self.last_shot_index_by_date,
             "processed_files": self.processed_files,
             "system_status": self.system_status,
+            "manual_date_str": self.manual_date_str,
         }
         try:
             with open(self.state_file, "w", encoding="utf-8") as f:
@@ -427,11 +456,12 @@ class ShotManager:
 
     def _resync_last_shot_from_clean_today(self):
         """
-        On startup: look into CLEAN folders for today's date, find last shot index
-        and determine if it's missing cameras.
+        On startup: look into CLEAN folders for the current active date
+        (today or manual override), find last shot index and determine if
+        it's missing cameras.
         """
-        today = datetime.now().strftime("%Y%m%d")
-        per_shot_cams = self._scan_clean_shots_for_date(today)
+        date_str = self._get_active_date_str()
+        per_shot_cams = self._scan_clean_shots_for_date(date_str)
         if not per_shot_cams:
             return
 
@@ -439,19 +469,27 @@ class ShotManager:
         cams_present = per_shot_cams[last_idx]
         missing = [c for c in self.config.expected_folders if c not in cams_present]
 
-        self.last_shot_index_by_date[today] = max(self.last_shot_index_by_date.get(today, 0), last_idx)
+        self.last_shot_index_by_date[date_str] = max(
+            self.last_shot_index_by_date.get(date_str, 0), last_idx
+        )
         self.last_completed_shot = {
-            "date_str": today,
+            "date_str": date_str,
             "shot_index": last_idx,
             "missing_cameras": missing,
         }
 
         if missing:
-            self._log("WARNING", f"Resynced last shot from CLEAN: {today} shot {last_idx:03d}, "
-                                 f"missing cameras: {missing}")
+            self._log(
+                "WARNING",
+                f"Resynced last shot from CLEAN: {date_str} shot {last_idx:03d}, "
+                f"missing cameras: {missing}",
+            )
             self.system_status = "ERROR"
         else:
-            self._log("INFO", f"Resynced last shot from CLEAN: {today} shot {last_idx:03d}, all cameras present")
+            self._log(
+                "INFO",
+                f"Resynced last shot from CLEAN: {date_str} shot {last_idx:03d}, all cameras present",
+            )
 
     # ---------------------------
     # PUBLIC CONTROL API
@@ -564,11 +602,25 @@ class ShotManager:
             self._refresh_manual_params_path()
         self._log("INFO", "Configuration updated for running manager.")
 
+    def set_manual_date(self, date_str: str | None):
+        """
+        Set or clear a manual date override for 'today'.
+
+        :param date_str: YYYYMMDD or None to disable manual mode.
+        """
+        with self.lock:
+            self.manual_date_str = date_str
+        if date_str is None:
+            self._log("INFO", "Manual date cleared, using system today().")
+        else:
+            self._log("INFO", f"Manual date set to {date_str}.")
+        self._save_state()
+
     def set_next_shot_number(self, k: int, date_str: str | None = None):
         if k < 1:
             k = 1
         if date_str is None:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = self._get_active_date_str()
         with self.lock:
             self.last_shot_index_by_date[date_str] = k - 1
         self._save_state()
@@ -576,7 +628,7 @@ class ShotManager:
 
     def check_next_shot_conflicts(self, proposed_k: int, date_str: str | None = None):
         if date_str is None:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = self._get_active_date_str()
         per_shot_cams = self._scan_clean_shots_for_date(date_str)
         indices = sorted(per_shot_cams.keys())
         same = proposed_k in indices
@@ -584,8 +636,8 @@ class ShotManager:
         return {"same": same, "higher": higher}
 
     def get_next_shot_number_today(self):
-        today = datetime.now().strftime("%Y%m%d")
-        return self.last_shot_index_by_date.get(today, 0) + 1
+        date_str = self._get_active_date_str()
+        return self.last_shot_index_by_date.get(date_str, 0) + 1
 
     # ---------------------------
     # STATUS FOR GUI
@@ -593,6 +645,7 @@ class ShotManager:
 
     def get_status(self):
         with self.lock:
+            active_date = self._get_active_date_str()
             open_count = len(self.open_shots)
             last_date_idx = None
             if self.last_shot_index_by_date:
@@ -615,6 +668,8 @@ class ShotManager:
                 "last_completed_shot_index": None,
                 "last_completed_shot_date": None,
                 "last_completed_trigger_time": None,
+                "active_date_str": active_date,
+                "manual_date_str": self.manual_date_str,
 
                 # Last shot panel
                 "last_shot_state": None,           # "acquiring" / "acquired_ok" / "acquired_missing" / None
@@ -1096,6 +1151,8 @@ class ShotManagerGUI:
         self.manager = None
 
         self.config = DEFAULT_CONFIG.clone()
+        self.var_date_mode = tk.StringVar(value="auto")
+        self.var_manual_date = tk.StringVar(value="")
         self.trigger_cam_vars = {}
         self.used_cam_vars = {}
         self.manual_param_vars: dict[str, tk.StringVar] = {}
@@ -1103,6 +1160,7 @@ class ShotManagerGUI:
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
 
         self._build_gui()
+        self._update_date_mode_label()
 
         self.root.after(200, self._poll_log_queue)
         self.root.after(500, self._update_status_labels)
@@ -1122,6 +1180,18 @@ class ShotManagerGUI:
         ttk.Entry(frm_root, textvariable=self.var_root, width=60).grid(row=0, column=1, sticky="we", padx=5)
         ttk.Button(frm_root, text="Browse", command=self._choose_root).grid(row=0, column=2, padx=5)
         frm_root.columnconfigure(1, weight=1)
+
+        frm_date = ttk.LabelFrame(self.root, text="Shot Date")
+        frm_date.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(frm_date, text="Current date mode:").grid(row=0, column=0, sticky="w")
+        self.lbl_date_mode = ttk.Label(frm_date, text="auto (today)")
+        self.lbl_date_mode.grid(row=0, column=1, sticky="w", padx=5)
+        ttk.Button(frm_date, text="Set manual date...", command=self._open_manual_date_dialog).grid(
+            row=0, column=2, padx=10
+        )
+
+        frm_date.columnconfigure(1, weight=1)
 
         # Timing
         frm_timing = ttk.LabelFrame(self.root, text="Time Window / Timeout")
@@ -1314,6 +1384,14 @@ class ShotManagerGUI:
         self.txt_logs.pack(fill="both", expand=True)
         self.txt_logs.configure(state="disabled")
 
+    def _update_date_mode_label(self):
+        if self.var_date_mode.get() == "manual":
+            date_str = self.var_manual_date.get().strip()
+            txt = f"manual {date_str}" if date_str else "manual (not set)"
+        else:
+            txt = "auto (today)"
+        self.lbl_date_mode.configure(text=txt)
+
     # ---------------------------
     # TRIGGER & USED CAMERAS POPUPS
     # ---------------------------
@@ -1393,6 +1471,46 @@ class ShotManagerGUI:
         if d:
             self.var_root.set(d)
 
+    def _open_manual_date_dialog(self):
+        top = tk.Toplevel(self.root)
+        top.title("Manual date")
+
+        use_manual = tk.BooleanVar(value=self.var_date_mode.get() == "manual")
+        date_var = tk.StringVar(value=self.var_manual_date.get())
+
+        ttk.Checkbutton(top, text="Use manual date (YYYYMMDD)", variable=use_manual).grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=5, pady=5
+        )
+        ttk.Label(top, text="Date:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        ttk.Entry(top, textvariable=date_var, width=20).grid(row=1, column=1, sticky="w", padx=5, pady=5)
+
+        def on_ok():
+            if not use_manual.get():
+                self.var_date_mode.set("auto")
+                self._update_date_mode_label()
+                if self.manager:
+                    self.manager.set_manual_date(None)
+                top.destroy()
+                return
+
+            date_str = date_var.get().strip()
+            try:
+                datetime.strptime(date_str, "%Y%m%d")
+            except ValueError:
+                messagebox.showerror("Error", "Invalid date format. Use YYYYMMDD (e.g., 20251202).")
+                return
+
+            self.var_date_mode.set("manual")
+            self.var_manual_date.set(date_str)
+            self._update_date_mode_label()
+            if self.manager:
+                self.manager.set_manual_date(date_str)
+            top.destroy()
+
+        ttk.Button(top, text="OK", command=on_ok).grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        ttk.Button(top, text="Cancel", command=top.destroy).grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        top.grab_set()
+
     def _choose_motor_initial(self):
         path = filedialog.askopenfilename(
             title="Choose initial motor positions CSV",
@@ -1433,8 +1551,31 @@ class ShotManagerGUI:
             messagebox.showerror("Error", f"Invalid root directory: {root_path}")
             return False
 
+        manual_date_for_start: str | None = None
+        if self.var_date_mode.get() == "manual":
+            manual_date_for_start = self.var_manual_date.get().strip()
+            if not manual_date_for_start:
+                messagebox.showerror("Error", "Please enter a manual date or switch to auto mode.")
+                self.var_date_mode.set("auto")
+                manual_date_for_start = None
+            else:
+                try:
+                    datetime.strptime(manual_date_for_start, "%Y%m%d")
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid manual date configured. Use YYYYMMDD.")
+                    self.var_date_mode.set("auto")
+                    manual_date_for_start = None
+
         runtime_config = self._build_runtime_config()
-        self.manager = ShotManager(root_path, runtime_config, self.log_queue)
+        self.manager = ShotManager(
+            root_path, runtime_config, self.log_queue, manual_date_str=manual_date_for_start
+        )
+        if manual_date_for_start:
+            self.manager.set_manual_date(manual_date_for_start)
+        elif self.manager.manual_date_str:
+            self.var_date_mode.set("manual")
+            self.var_manual_date.set(self.manager.manual_date_str)
+        self._update_date_mode_label()
         return True
 
     def _build_runtime_config(self) -> ShotLogConfig:
@@ -2003,6 +2144,13 @@ class ShotManagerGUI:
         if self.manager:
             st = self.manager.get_status()
             self._handle_manual_params_status(st)
+            if st.get("manual_date_str") and self.var_date_mode.get() != "manual":
+                self.var_date_mode.set("manual")
+                self.var_manual_date.set(st.get("manual_date_str") or "")
+                self._update_date_mode_label()
+            elif not st.get("manual_date_str") and self.var_date_mode.get() != "auto":
+                self.var_date_mode.set("auto")
+                self._update_date_mode_label()
             self.lbl_system.configure(text=st["system_status"])
             self.lbl_open.configure(text=str(st["open_shots_count"]))
 
