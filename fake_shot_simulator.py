@@ -94,9 +94,10 @@ class CameraConfig:
 class FakeShotSimulator:
     def __init__(self):
         # Config "runtime"
-        self.project_root: Path = PROJECT_ROOT
-        self.raw_root: Path = self.project_root / RAW_FOLDER_NAME
-        self.motor_root: Path = self.project_root / MOTOR_FOLDER_NAME
+        self.sim_root: Path | None = PROJECT_ROOT
+        self.raw_subfolder_name: str = RAW_FOLDER_NAME
+        self.motor_subfolder_name: str = MOTOR_FOLDER_NAME
+        self.initial_csv_path: Path | None = None
 
         self.date = SHOT_DATE
         self.shot_index = 1  # shot logique (1, 2, 3, ...)
@@ -107,11 +108,35 @@ class FakeShotSimulator:
             specs = [CameraFileSpec(keyword=s["keyword"], ext=s["ext"]) for s in spec_list]
             self.cameras.append(CameraConfig(name=cam_name, specs=specs))
 
-        self.motor_axes: list[str] = []
-
         # Dictionnaire Axis -> position courante (pour les moteurs)
-        self.motor_positions = {}
-        self._load_initial_motor_positions()
+        self.motor_axes: dict[str, float] = {}
+        self.initial_csv_path = self.motor_root / INITIAL_MOTOR_FILE if self.motor_root else None
+        self._ensure_dir(self.raw_root)
+        self._ensure_dir(self.motor_root)
+        self.load_initial_axes_from_csv()
+
+    @property
+    def project_root(self) -> Path | None:
+        return self.sim_root
+
+    @property
+    def raw_root(self) -> Path | None:
+        if self.sim_root is None:
+            return None
+        return self.sim_root / self.raw_subfolder_name
+
+    @property
+    def motor_root(self) -> Path | None:
+        if self.sim_root is None:
+            return None
+        return self.sim_root / self.motor_subfolder_name
+
+    @property
+    def motor_history_csv(self) -> Path | None:
+        root = self.motor_root
+        if root is None:
+            return None
+        return root / f"{MOTOR_HISTORY_PREFIX}{self.date.isoformat()}.csv"
 
     def set_cameras(self, cameras: list[CameraConfig]):
         self.cameras = cameras
@@ -125,7 +150,9 @@ class FakeShotSimulator:
 
     # ---------- helpers chemin / date / heure ----------
 
-    def _ensure_dir(self, path: Path):
+    def _ensure_dir(self, path: Path | None):
+        if path is None:
+            return
         path.mkdir(parents=True, exist_ok=True)
 
     def _date_str(self) -> str:
@@ -140,54 +167,69 @@ class FakeShotSimulator:
     # ---------- gestion des dossiers ----------
 
     def set_project_root(self, new_root: Path):
-        self.project_root = new_root
-        self.raw_root = new_root / RAW_FOLDER_NAME
-        self.motor_root = new_root / MOTOR_FOLDER_NAME
+        self.sim_root = new_root
+        if self.initial_csv_path is None and self.motor_root is not None:
+            self.initial_csv_path = self.motor_root / INITIAL_MOTOR_FILE
         print(f"[SIM] Project root set to: {self.project_root}")
         print(f"[SIM] RAW root: {self.raw_root}")
         print(f"[SIM] Motor root: {self.motor_root}")
         self._ensure_dir(self.raw_root)
         self._ensure_dir(self.motor_root)
-        self._load_initial_motor_positions()
+        self.load_initial_axes_from_csv()
+
+    def apply_subfolders(self, raw_name: str, motor_name: str):
+        self.raw_subfolder_name = raw_name or self.raw_subfolder_name
+        self.motor_subfolder_name = motor_name or self.motor_subfolder_name
+        print(f"[SIM] RAW subfolder set to: {self.raw_subfolder_name}")
+        print(f"[SIM] MOTOR subfolder set to: {self.motor_subfolder_name}")
+        if self.initial_csv_path is None and self.motor_root is not None:
+            self.initial_csv_path = self.motor_root / INITIAL_MOTOR_FILE
+        self._ensure_dir(self.raw_root)
+        self._ensure_dir(self.motor_root)
+        self.load_initial_axes_from_csv()
+
+    def set_initial_csv(self, path: Path | None):
+        self.initial_csv_path = path
+        if path:
+            print(f"[SIM] initial.csv path set to {path}")
+        else:
+            print("[SIM] initial.csv path cleared")
+        self.load_initial_axes_from_csv()
 
     # ---------- moteurs ----------
 
-    def _load_initial_motor_positions(self):
-        """
-        Charge éventuellement un fichier initial.csv dans motor_root
-        pour initialiser les positions des axes. Si absent, on
-        initialise une dict vide et on utilisera 0.0 par défaut.
-        """
-        self.motor_positions = {}
-        self.motor_axes = []
-        init_path = self.motor_root / INITIAL_MOTOR_FILE
-        if not init_path.exists():
-            print(
-                f"[SIM] No initial motor file found at {init_path}, starting with empty positions and no axes."
-            )
+    def load_initial_axes_from_csv(self) -> None:
+        """Lit initial.csv et prépare la structure des axes moteurs pour le simulateur."""
+        self.motor_axes = {}
+        if self.initial_csv_path is None:
+            print("[SIM] No initial.csv path set, cannot load motor axes.")
+            return
+
+        if not self.initial_csv_path.is_file():
+            print(f"[SIM] initial.csv not found at {self.initial_csv_path}")
             return
 
         try:
-            with init_path.open("r", newline="", encoding="utf-8") as f:
+            with self.initial_csv_path.open("r", newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    axis = row.get("Axis")
-                    pos_str = row.get("Position")
-                    if axis and pos_str:
-                        try:
-                            pos = float(pos_str)
-                        except ValueError:
-                            continue
-                        self.motor_positions[axis] = pos
-            self.motor_axes = list(self.motor_positions.keys())
-            print(f"[SIM] Loaded initial motor positions from {init_path} "
-                  f"for {len(self.motor_positions)} axes.")
+                    axis = (row.get("axis_name") or row.get("Axis") or "").strip()
+                    if not axis:
+                        continue
+                    try:
+                        pos = float(row.get("position") or row.get("Position") or "0.0")
+                    except ValueError:
+                        pos = 0.0
+                    self.motor_axes[axis] = pos
         except Exception as e:
-            print(f"[SIM] Error reading initial motor file {init_path}: {e}")
+            print(f"[SIM] Error while loading initial.csv: {e}")
+            self.motor_axes = {}
+            return
 
-    def _motor_history_path_for_today(self) -> Path:
-        date_str = self.date.isoformat()  # YYYY-MM-DD
-        return self.motor_root / f"{MOTOR_HISTORY_PREFIX}{date_str}.csv"
+        if not self.motor_axes:
+            print("[SIM] No motor axes loaded from initial.csv (file parsed but no axes found).")
+        else:
+            print(f"[SIM] Loaded {len(self.motor_axes)} motor axes from {self.initial_csv_path}")
 
     def generate_motor_event(self):
         """
@@ -205,27 +247,36 @@ class FakeShotSimulator:
                 pass
             return
 
-        self._ensure_dir(self.motor_root)
-        hist_path = self._motor_history_path_for_today()
-        file_exists = hist_path.exists()
+        history_path = self.motor_history_csv
+        if history_path is None:
+            print("[SIM] No motor history path defined, cannot append motor event.")
+            return
 
-        axis = random.choice(self.motor_axes)
+        self._ensure_dir(history_path.parent)
+        file_exists = history_path.exists()
 
-        old_pos = self.motor_positions.get(axis, 0.0)
+        axis = random.choice(list(self.motor_axes.keys()))
+
+        old_pos = self.motor_axes.get(axis, 0.0)
         delta = random.uniform(-5.0, 5.0)
         new_pos = old_pos + delta
-        self.motor_positions[axis] = new_pos
+        self.motor_axes[axis] = new_pos
 
         time_str = self._now_time_str()
 
-        with hist_path.open("a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
+        with history_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["Time", "Axis", "Old Position", "New Position"])
             if not file_exists:
-                writer.writerow(["Time", "Axis", "Old Position", "New Position"])
-            writer.writerow([time_str, axis, f"{old_pos:.3f}", f"{new_pos:.3f}"])
+                writer.writeheader()
+            writer.writerow({
+                "Time": time_str,
+                "Axis": axis,
+                "Old Position": f"{old_pos:.3f}",
+                "New Position": f"{new_pos:.3f}",
+            })
 
         print(f"[SIM] Motor event: time={time_str}, axis={axis}, "
-              f"old={old_pos:.3f}, new={new_pos:.3f}, file={hist_path}")
+              f"old={old_pos:.3f}, new={new_pos:.3f}, file={history_path}")
 
     # ---------- génération de fichiers pour un shot ----------
 
@@ -285,6 +336,10 @@ class FakeShotSimulator:
         - Pour chaque caméra, pour chaque spec, on planifie la création
           d'un fichier dans la fenêtre [shot_time, shot_time + max_delay_sec].
         """
+        if self.raw_root is None:
+            print("[SIM] No RAW root configured, cannot generate shot.")
+            return
+
         self._ensure_dir(self.raw_root)
         start_time = datetime.now()
         shot_number = self.shot_index
@@ -307,9 +362,13 @@ class FakeShotSimulator:
 
     def to_config_dict(self) -> dict:
         return {
-            "project_root": str(self.project_root),
-            "raw_folder_name": RAW_FOLDER_NAME,
-            "motor_folder_name": MOTOR_FOLDER_NAME,
+            "project_root": str(self.project_root) if self.project_root else "",
+            "raw_folder_name": self.raw_subfolder_name,
+            "motor_folder_name": self.motor_subfolder_name,
+            "sim_root": str(self.sim_root) if self.sim_root else "",
+            "raw_subfolder_name": self.raw_subfolder_name,
+            "motor_subfolder_name": self.motor_subfolder_name,
+            "initial_csv_path": str(self.initial_csv_path) if self.initial_csv_path else "",
             "date": self.date.isoformat(),
             "max_delay_sec": self.max_delay_sec,
             "cameras": [
@@ -325,9 +384,9 @@ class FakeShotSimulator:
         }
 
     def load_from_config_dict(self, cfg: dict):
-        pr = cfg.get("project_root")
-        if pr:
-            self.set_project_root(Path(pr))
+        root_str = cfg.get("sim_root") or cfg.get("project_root") or ""
+        if root_str:
+            self.set_project_root(Path(root_str))
 
         date_str = cfg.get("date")
         if date_str:
@@ -336,6 +395,15 @@ class FakeShotSimulator:
         md = cfg.get("max_delay_sec")
         if md is not None:
             self.set_max_delay(float(md))
+
+        raw_name = cfg.get("raw_subfolder_name") or cfg.get("raw_folder_name")
+        motor_name = cfg.get("motor_subfolder_name") or cfg.get("motor_folder_name")
+        if raw_name or motor_name:
+            self.apply_subfolders(raw_name or self.raw_subfolder_name, motor_name or self.motor_subfolder_name)
+
+        init_csv = cfg.get("initial_csv_path") or ""
+        if init_csv:
+            self.set_initial_csv(Path(init_csv))
 
         cams = []
         for c in cfg.get("cameras", []):
@@ -361,20 +429,35 @@ class SimulatorGUI:
 
         root.title("Fake ShotLog Simulator")
 
-        # Racine projet
-        self.project_var = tk.StringVar(value=str(self.sim.project_root))
+        # Chemins et configuration
+        self.sim_root_var = tk.StringVar(value=str(self.sim.sim_root) if self.sim.sim_root else "")
+        self.raw_subfolder_var = tk.StringVar(value=self.sim.raw_subfolder_name)
+        self.motor_subfolder_var = tk.StringVar(value=self.sim.motor_subfolder_name)
+        self.initial_csv_var = tk.StringVar(value=str(self.sim.initial_csv_path) if self.sim.initial_csv_path else "")
         self.delay_var = tk.StringVar(value=str(self.sim.max_delay_sec))
 
-        frm_root = tk.Frame(root)
-        frm_root.pack(padx=10, pady=10, fill="x")
+        paths_frame = tk.LabelFrame(root, text="Paths")
+        paths_frame.pack(padx=10, pady=10, fill="x")
 
-        tk.Label(frm_root, text="Project root:").grid(row=0, column=0, sticky="w")
-        self.entry_root = tk.Entry(frm_root, textvariable=self.project_var, width=60)
+        tk.Label(paths_frame, text="Simulation root folder:").grid(row=0, column=0, sticky="w")
+        self.entry_root = tk.Entry(paths_frame, textvariable=self.sim_root_var, width=60)
         self.entry_root.grid(row=0, column=1, sticky="we", padx=5)
-        btn_browse = tk.Button(frm_root, text="Browse...", command=self._browse_root)
+        btn_browse = tk.Button(paths_frame, text="Browse...", command=self._browse_root)
         btn_browse.grid(row=0, column=2, padx=5)
 
-        frm_root.columnconfigure(1, weight=1)
+        tk.Label(paths_frame, text="RAW subfolder name:").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        tk.Entry(paths_frame, textvariable=self.raw_subfolder_var, width=30).grid(row=1, column=1, sticky="w", padx=5, pady=(5, 0))
+
+        tk.Label(paths_frame, text="MOTOR subfolder name:").grid(row=2, column=0, sticky="w")
+        tk.Entry(paths_frame, textvariable=self.motor_subfolder_var, width=30).grid(row=2, column=1, sticky="w", padx=5)
+
+        tk.Button(paths_frame, text="Apply paths", command=self._apply_paths).grid(row=1, column=2, rowspan=2, padx=5)
+
+        tk.Label(paths_frame, text="Initial motor CSV:").grid(row=3, column=0, sticky="w", pady=(5, 0))
+        tk.Entry(paths_frame, textvariable=self.initial_csv_var, width=60).grid(row=3, column=1, sticky="we", padx=5, pady=(5, 0))
+        tk.Button(paths_frame, text="Browse...", command=self._browse_initial_csv).grid(row=3, column=2, padx=5, pady=(5, 0))
+
+        paths_frame.columnconfigure(1, weight=1)
 
         # Boutons config save/load
         frm_cfg = tk.Frame(root)
@@ -447,15 +530,39 @@ class SimulatorGUI:
     def _browse_root(self):
         new_dir = filedialog.askdirectory(
             title="Select project root",
-            initialdir=str(self.sim.project_root)
+            initialdir=str(self.sim.sim_root) if self.sim.sim_root else None
         )
         if not new_dir:
             return
         p = Path(new_dir)
-        self.project_var.set(str(p))
+        self.sim_root_var.set(str(p))
         self.sim.set_project_root(p)
+        self.initial_csv_var.set(str(self.sim.initial_csv_path) if self.sim.initial_csv_path else "")
         self.lbl_paths.config(text=self._format_paths_text())
         self._refresh_camera_label()
+
+    def _apply_paths(self):
+        self.sim.apply_subfolders(
+            self.raw_subfolder_var.get().strip(),
+            self.motor_subfolder_var.get().strip(),
+        )
+        init_value = self.initial_csv_var.get().strip()
+        if init_value:
+            self.sim.set_initial_csv(Path(init_value))
+        else:
+            self.sim.set_initial_csv(None)
+        self.lbl_paths.config(text=self._format_paths_text())
+
+    def _browse_initial_csv(self):
+        selected = filedialog.askopenfilename(
+            title="Select initial motor CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not selected:
+            return
+        path = Path(selected)
+        self.initial_csv_var.set(str(path))
+        self.sim.set_initial_csv(path)
 
     def _on_generate_shot(self):
         try:
@@ -643,9 +750,12 @@ class SimulatorGUI:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             self.sim.load_from_config_dict(cfg)
-            self.project_var.set(str(self.sim.project_root))
+            self.sim_root_var.set(str(self.sim.sim_root) if self.sim.sim_root else "")
             self.lbl_paths.config(text=self._format_paths_text())
             self.delay_var.set(str(self.sim.max_delay_sec))
+            self.raw_subfolder_var.set(self.sim.raw_subfolder_name)
+            self.motor_subfolder_var.set(self.sim.motor_subfolder_name)
+            self.initial_csv_var.set(str(self.sim.initial_csv_path) if self.sim.initial_csv_path else "")
             self.shot_var.set(f"Next shot index: {self.sim.shot_index}")
             self._refresh_camera_label()
             messagebox.showinfo("Config loaded", f"Configuration loaded from:\n{path}")
