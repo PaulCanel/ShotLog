@@ -28,35 +28,55 @@ from .utils import ensure_dir, extract_shot_index_from_name, format_dt_for_name
 
 class RawFileEventHandler(FileSystemEventHandler):
     """
-    Watchdog handler: notifies the ShotManager when new files appear.
+    Watchdog handler: logs every filesystem event and notifies the ShotManager
+    when new or updated files appear under RAW root.
     """
 
     def __init__(self, manager):
         super().__init__()
         self.manager = manager
 
-    def on_created(self, event):
-        if event.is_directory:
-            return
+    # ---- helper interne pour log + dispatch ----
+    def _handle_path(self, label: str, path_str: str):
+        from pathlib import Path
+        p = Path(path_str)
+        exists = p.exists()
 
-        path = Path(event.src_path)
-
-        # \U0001f525 DEBUG LOG : chaque fichier détecté par watchdog
+        # Log clair côté ShotManager (pour la console de shot_log)
         try:
             self.manager._log(
                 "INFO",
-                f"[WATCHDOG] New file detected: {path} | exists={path.exists()}"
+                f"[WATCHDOG {label}] event on file: {p} | exists={exists}"
             )
         except Exception as e:
-            print(f"[WATCHDOG DEBUG ERROR] {e}")
+            # fallback minimal au cas où le logger n'est pas prêt
+            print(f"[WATCHDOG {label} DEBUG ERROR] {e} for path {p}")
 
-        # Continue normal processing
-        self.manager.handle_new_raw_file(path)
+        # Passer au pipeline normal seulement si le fichier existe
+        if exists:
+            self.manager.handle_new_raw_file(path_str)
+
+    # ---- events watchdog ----
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        self._handle_path("CREATED", event.src_path)
 
     def on_moved(self, event):
         if event.is_directory:
             return
-        self.manager.handle_new_raw_file(event.dest_path)
+        # on s'intéresse à la destination
+        self._handle_path("MOVED", event.dest_path)
+
+    def on_modified(self, event):
+        """
+        Important pour PollingObserver: sur certains systèmes / modes de copie,
+        la création d'un fichier peut apparaître comme une séquence de 'modified'.
+        On route donc aussi ces events vers le manager.
+        """
+        if event.is_directory:
+            return
+        self._handle_path("MODIFIED", event.src_path)
 
 
 # ============================================================
