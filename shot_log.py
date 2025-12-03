@@ -140,6 +140,7 @@ class ShotManager:
         # Logging
         self._setup_logging()
         self._ensure_expected_cameras(log_prefix="Initial expected cameras")
+        self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
         self._load_state()
         self._resync_last_shot_from_clean_today()
 
@@ -673,6 +674,7 @@ class ShotManager:
             "INFO",
             f"Configuration updated for running manager. Expected cameras: {ensured_expected}",
         )
+        self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
 
     def set_manual_date(self, date_str: str | None):
         """
@@ -1277,6 +1279,7 @@ class ShotManagerGUI:
         self.current_manual_params_shot: dict | None = None
         self.last_seen_completed_manual_key: tuple[str, int] | None = None
         self.last_seen_current_shot_key: tuple[str, int] | None = None
+        self.manual_target_next_shot: int | None = None
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
 
         self._build_gui()
@@ -1739,6 +1742,11 @@ class ShotManagerGUI:
             cfg.timeout_s = float(self.var_timeout.get() or cfg.timeout_s)
         except ValueError:
             messagebox.showerror("Error", "Full window and timeout must be numeric.")
+        cfg.project_root = self.var_root.get().strip() or None
+        if self.var_date_mode.get() == "manual":
+            cfg.manual_date_override = self.var_manual_date.get().strip() or None
+        else:
+            cfg.manual_date_override = None
         cfg.motor_initial_csv = self.var_motor_initial.get()
         cfg.motor_history_csv = self.var_motor_history.get()
         cfg.motor_positions_output = self.var_motor_output.get()
@@ -1860,11 +1868,13 @@ class ShotManagerGUI:
         top = tk.Toplevel(self.root)
         top.title("Folder list")
 
-        columns = ("expected", "trigger", "specs")
+        columns = ("name", "expected", "trigger", "specs")
         tree = ttk.Treeview(top, columns=columns, show="headings", height=10)
+        tree.heading("name", text="Folder")
         tree.heading("expected", text="Expected")
         tree.heading("trigger", text="Trigger")
         tree.heading("specs", text="# file specs")
+        tree.column("name", width=120, anchor="w")
         tree.column("expected", width=80, anchor="center")
         tree.column("trigger", width=70, anchor="center")
         tree.column("specs", width=90, anchor="center")
@@ -1880,7 +1890,12 @@ class ShotManagerGUI:
                     "",
                     "end",
                     iid=folder.name,
-                    values=("yes" if folder.expected else "no", "yes" if folder.trigger else "no", len(folder.file_specs)),
+                    values=(
+                        folder.name,
+                        "yes" if folder.expected else "no",
+                        "yes" if folder.trigger else "no",
+                        len(folder.file_specs),
+                    ),
                 )
 
         def on_add():
@@ -2106,19 +2121,36 @@ class ShotManagerGUI:
         return values
 
     def _update_manual_target_label(self):
-        if self.current_manual_params_shot is None:
-            if self.last_seen_completed_manual_key is None:
-                txt = "Manual parameters – no shot yet"
-            else:
-                txt = "Manual parameters – no pending shot"
+        shot_idx = None
+        if self.current_manual_params_shot is not None:
+            shot_idx = self.current_manual_params_shot.get("shot_index")
+        elif self.manual_target_next_shot is not None:
+            shot_idx = self.manual_target_next_shot
+
+        if shot_idx is None:
+            txt = "Manual parameters – waiting for first shot number"
         else:
-            idx = self.current_manual_params_shot.get("shot_index")
-            txt = f"Manual parameters for shot {idx:03d}"
+            shot_txt = f"{shot_idx:03d}" if isinstance(shot_idx, int) else str(shot_idx)
+            txt = (
+                f"Manual parameters for shot {shot_txt} "
+                "(values will be automatically associated to this shot when it is acquired)"
+            )
         self.lbl_manual_target.configure(text=txt)
 
-    def _update_manual_submit_state(self):
-        state = "normal" if self.current_manual_params_shot is not None else "disabled"
-        self.btn_manual_submit.configure(state=state)
+    def _update_manual_submit_state(
+        self, current_key: tuple[str, int] | None = None, current_state: str | None = None
+    ):
+        if current_key is None:
+            current_key = self.last_seen_current_shot_key
+        enabled = False
+        if (
+            current_state == "acquiring"
+            and current_key is not None
+            and self.current_manual_params_shot is not None
+            and self.current_manual_params_shot.get("key") == current_key
+        ):
+            enabled = any(var.get().strip() for var in self.manual_param_vars.values())
+        self.btn_manual_submit.configure(state="normal" if enabled else "disabled")
 
     def _choose_manual_params_csv(self):
         path = filedialog.asksaveasfilename(
@@ -2205,6 +2237,7 @@ class ShotManagerGUI:
         self._finalize_manual_params_submission()
 
     def _handle_manual_params_status(self, status: dict):
+        self.manual_target_next_shot = status.get("next_shot_number")
         last_idx = status.get("last_completed_shot_index")
         last_date = status.get("last_completed_shot_date")
         last_trigger = status.get("last_completed_trigger_time")
@@ -2218,7 +2251,11 @@ class ShotManagerGUI:
             current_key = (current_shot_date, current_shot_idx)
 
         if current_key != self.last_seen_current_shot_key:
-            if current_key is not None and self.current_manual_params_shot is not None:
+            if (
+                current_key is not None
+                and self.current_manual_params_shot is not None
+                and self.current_manual_params_shot.get("key") not in (None, current_key)
+            ):
                 shot_idx = self.current_manual_params_shot.get("shot_index")
                 shot_txt = f"{shot_idx:03d}" if isinstance(shot_idx, int) else str(shot_idx)
                 self._append_log(
@@ -2248,8 +2285,27 @@ class ShotManagerGUI:
                 "date": last_date,
                 "trigger_time": last_trigger,
             }
-            self._update_manual_target_label()
-            self._update_manual_submit_state()
+
+        if (
+            self.current_manual_params_shot is None
+            and current_key is not None
+            and current_shot_idx is not None
+        ):
+            self.current_manual_params_shot = {
+                "key": current_key,
+                "shot_index": current_shot_idx,
+                "date": current_shot_date,
+                "trigger_time": None,
+            }
+        elif (
+            completed_key
+            and self.current_manual_params_shot is not None
+            and self.current_manual_params_shot.get("key") == completed_key
+        ):
+            self.current_manual_params_shot["trigger_time"] = last_trigger
+
+        self._update_manual_target_label()
+        self._update_manual_submit_state(current_key, current_shot_state)
 
     def _after_config_changed(self):
         self._refresh_folder_labels()
@@ -2258,6 +2314,12 @@ class ShotManagerGUI:
 
     def _save_config(self):
         cfg = self._build_runtime_config()
+        cfg.project_root = self.var_root.get().strip() or None
+        cfg.manual_date_override = (
+            self.var_manual_date.get().strip() or None
+            if self.var_date_mode.get() == "manual"
+            else None
+        )
         path = filedialog.asksaveasfilename(
             title="Save configuration",
             defaultextension=".json",
@@ -2284,8 +2346,23 @@ class ShotManagerGUI:
                 data = json.load(f)
             self.config = ShotLogConfig.from_dict(data)
             self._refresh_from_config()
+            if self.config.project_root:
+                self.var_root.set(self.config.project_root)
+            if self.config.manual_date_override:
+                self.var_date_mode.set("manual")
+                self.var_manual_date.set(self.config.manual_date_override)
+            else:
+                self.var_date_mode.set("auto")
+                self.var_manual_date.set("")
+            self._update_date_mode_label()
+            self._apply_timing(apply_to_manager=True)
+            self._apply_keyword()
+            self._after_config_changed()
             if self.manager:
-                self.manager.update_config(self._build_runtime_config())
+                self.manager.set_manual_date(self.config.manual_date_override)
+                self._update_status_labels()
+                self._update_manual_target_label()
+                self._update_manual_submit_state()
             self._append_log(f"[INFO] Configuration loaded from {path}")
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to load configuration: {exc}")
@@ -2307,6 +2384,7 @@ class ShotManagerGUI:
         self.current_manual_params_shot = None
         self.last_seen_completed_manual_key = None
         self.last_seen_current_shot_key = None
+        self.manual_target_next_shot = None
         self._update_manual_target_label()
         self._update_manual_submit_state()
         self._refresh_folder_labels()
@@ -2421,6 +2499,7 @@ class ShotManagerGUI:
             self.current_manual_params_shot = None
             self.last_seen_completed_manual_key = None
             self.last_seen_current_shot_key = None
+            self.manual_target_next_shot = None
             self._update_manual_target_label()
             self._update_manual_submit_state()
 

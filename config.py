@@ -89,6 +89,7 @@ class FolderConfig:
 class ShotLogConfig:
     raw_root_suffix: str = "ELI50069_RAW_DATA"
     clean_root_suffix: str = "ELI50069_CLEAN_DATA"
+    project_root: str | None = None
     full_window_s: float = 10.0
     timeout_s: float = 20.0
     global_trigger_keyword: str = "shot"
@@ -102,12 +103,14 @@ class ShotLogConfig:
     motor_positions_output: str = "motor_positions_by_shot.csv"
     manual_params: List[str] = field(default_factory=list)
     manual_params_csv_path: str | None = "manual_params_by_shot.csv"
+    manual_date_override: str | None = None
     folders: Dict[str, FolderConfig] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "raw_root_suffix": self.raw_root_suffix,
             "clean_root_suffix": self.clean_root_suffix,
+            "project_root": self.project_root,
             "full_window_s": self.full_window_s,
             "timeout_s": self.timeout_s,
             "global_trigger_keyword": self.global_trigger_keyword,
@@ -121,6 +124,7 @@ class ShotLogConfig:
             "motor_positions_output": self.motor_positions_output,
             "manual_params": list(self.manual_params),
             "manual_params_csv_path": self.manual_params_csv_path,
+            "manual_date_override": self.manual_date_override,
             "folders": [folder.to_dict() for folder in self.folders.values()],
         }
 
@@ -135,6 +139,7 @@ class ShotLogConfig:
         cfg = cls(
             raw_root_suffix=data.get("raw_root_suffix", "ELI50069_RAW_DATA"),
             clean_root_suffix=data.get("clean_root_suffix", "ELI50069_CLEAN_DATA"),
+            project_root=data.get("project_root"),
             full_window_s=float(data.get("full_window_s", 10.0)),
             timeout_s=float(data.get("timeout_s", 20.0)),
             global_trigger_keyword=data.get("global_trigger_keyword", "shot"),
@@ -148,6 +153,7 @@ class ShotLogConfig:
             motor_positions_output=data.get("motor_positions_output", "motor_positions_by_shot.csv"),
             manual_params=list(data.get("manual_params", [])),
             manual_params_csv_path=data.get("manual_params_csv_path", "manual_params_by_shot.csv"),
+            manual_date_override=data.get("manual_date_override"),
             folders=folders,
         )
         if not cfg.folders:
@@ -183,12 +189,9 @@ class ShotLogConfig:
         folder = self.folders.get(folder_name)
         if not folder or not folder.trigger:
             return False
-        keyword = self.global_trigger_keyword
-        if not keyword or keyword.lower() not in filename_lower:
-            return False
         return folder.matches(
             filename_lower,
-            global_keyword=keyword,
+            global_keyword=self.global_trigger_keyword,
             apply_global_keyword=self.apply_global_keyword_to_all,
         )
 
