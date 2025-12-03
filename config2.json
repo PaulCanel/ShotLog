@@ -1,0 +1,104 @@
+{
+  "raw_root_suffix": "ELI50069_RAW_DATA",
+  "clean_root_suffix": "ELI50069_CLEAN_DATA",
+  "project_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "full_window_s": 30.0,
+  "timeout_s": 65.0,
+  "global_trigger_keyword": "shot",
+  "apply_global_keyword_to_all": false,
+  "test_keywords": [
+    "test",
+    "align"
+  ],
+  "state_file": "eli50069_state.json",
+  "log_dir": "rename_log",
+  "check_interval_s": 0.5,
+  "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/initial.csv",
+  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/istoric_2025-12-02.csv",
+  "motor_positions_output": "motor_positions_by_shot.csv",
+  "manual_params": [
+    "Laser Energy",
+    "Jet 1"
+  ],
+  "manual_params_csv_path": "manual_params_by_shot.csv",
+  "manual_date_override": "20251202",
+  "folders": [
+    {
+      "name": "Lanex1",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex2",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex3",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex4",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex5",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Csi",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lyso",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extension": ".tiff"
+        }
+      ]
+    }
+  ]
+}
