@@ -28,9 +28,9 @@ class ShotManagerGUI:
 
         self.config = DEFAULT_CONFIG.clone()
         self.var_root = tk.StringVar(value=self.config.project_root or "")
-        self.var_raw_folder = tk.StringVar(value=self.config.raw_folder_name)
-        self.var_clean_folder = tk.StringVar(value=self.config.clean_folder_name)
-        self.var_log_folder = tk.StringVar(value=self.config.log_folder_name)
+        self.var_raw_folder = tk.StringVar(value=self.config.raw_root_suffix)
+        self.var_clean_folder = tk.StringVar(value=self.config.clean_root_suffix)
+        self.var_log_folder = tk.StringVar(value=self.config.rename_log_folder_suffix)
         self.var_date_mode = tk.StringVar(value="auto")
         self.var_manual_date = tk.StringVar(value="")
         self.trigger_cam_vars = {}
@@ -540,9 +540,11 @@ class ShotManagerGUI:
         except ValueError:
             messagebox.showerror("Error", "Full window and timeout must be numeric.")
         cfg.project_root = self.var_root.get().strip() or None
-        cfg.raw_folder_name = self.var_raw_folder.get().strip() or cfg.raw_folder_name
-        cfg.clean_folder_name = self.var_clean_folder.get().strip() or cfg.clean_folder_name
-        cfg.log_folder_name = self.var_log_folder.get().strip() or cfg.log_folder_name
+        cfg.raw_root_suffix = self.var_raw_folder.get().strip() or cfg.raw_root_suffix
+        cfg.clean_root_suffix = self.var_clean_folder.get().strip() or cfg.clean_root_suffix
+        cfg.rename_log_folder_suffix = (
+            self.var_log_folder.get().strip() or cfg.rename_log_folder_suffix
+        )
         if self.var_date_mode.get() == "manual":
             cfg.manual_date_override = self.var_manual_date.get().strip() or None
         else:
@@ -606,9 +608,9 @@ class ShotManagerGUI:
         else:
             base_root_str = self.var_root.get().strip()
             base_root = Path(base_root_str) if base_root_str else None
-            raw_name = self.var_raw_folder.get().strip() or self.config.raw_folder_name
-            clean_name = self.var_clean_folder.get().strip() or self.config.clean_folder_name
-            log_name = self.var_log_folder.get().strip() or self.config.log_folder_name
+            raw_name = self.var_raw_folder.get().strip() or self.config.raw_root_suffix
+            clean_name = self.var_clean_folder.get().strip() or self.config.clean_root_suffix
+            log_name = self.var_log_folder.get().strip() or self.config.rename_log_folder_suffix
             raw_val = raw_path or (base_root / raw_name if base_root else None)
             clean_val = clean_path or (base_root / clean_name if base_root else None)
             log_val = log_path or (base_root / log_name if base_root else None)
@@ -644,9 +646,9 @@ class ShotManagerGUI:
             path.mkdir(parents=True, exist_ok=True)
 
         self.config.project_root = base_root
-        self.config.raw_folder_name = raw_name
-        self.config.clean_folder_name = clean_name
-        self.config.log_folder_name = log_name
+        self.config.raw_root_suffix = raw_name
+        self.config.clean_root_suffix = clean_name
+        self.config.rename_log_folder_suffix = log_name
 
         runtime_config = self._build_runtime_config()
         self.config = runtime_config.clone()
@@ -1252,8 +1254,8 @@ class ShotManagerGUI:
                 self.var_manual_date.set("")
             self._update_date_mode_label()
             self._append_log(
-                f"[INFO] Loaded paths: RAW='{self.config.raw_folder_name}', "
-                f"CLEAN='{self.config.clean_folder_name}', LOG='{self.config.log_folder_name}'"
+                f"[INFO] Loaded paths: RAW='{self.config.raw_root_suffix}', "
+                f"CLEAN='{self.config.clean_root_suffix}', LOG='{self.config.rename_log_folder_suffix}'"
             )
             self._apply_paths()
             self._apply_timing(apply_to_manager=True)
@@ -1279,9 +1281,9 @@ class ShotManagerGUI:
     def _refresh_from_config(self):
         if self.config.project_root:
             self.var_root.set(self.config.project_root)
-        self.var_raw_folder.set(self.config.raw_folder_name)
-        self.var_clean_folder.set(self.config.clean_folder_name)
-        self.var_log_folder.set(self.config.log_folder_name)
+        self.var_raw_folder.set(self.config.raw_root_suffix)
+        self.var_clean_folder.set(self.config.clean_root_suffix)
+        self.var_log_folder.set(self.config.rename_log_folder_suffix)
         self.var_window.set(str(self.config.full_window_s))
         self.var_timeout.set(str(self.config.timeout_s))
         self.var_global_kw.set(self.config.global_trigger_keyword)

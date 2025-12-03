@@ -91,10 +91,10 @@ class FolderConfig:
 
 @dataclass
 class ShotLogConfig:
-    raw_folder_name: str = "ELI50069_RAW_DATA"
-    clean_folder_name: str = "ELI50069_CLEAN_DATA"
-    log_folder_name: str = "rename_log"
     project_root: str | None = None
+    raw_root_suffix: str = "ELI50069_RAW_DATA"
+    clean_root_suffix: str = "ELI50069_CLEAN_DATA"
+    rename_log_folder_suffix: str = "rename_log"
     full_window_s: float = 10.0
     timeout_s: float = 20.0
     global_trigger_keyword: str = "shot"
@@ -112,20 +112,21 @@ class ShotLogConfig:
 
     def to_dict(self) -> dict:
         return {
-            "raw_folder_name": self.raw_folder_name,
-            "clean_folder_name": self.clean_folder_name,
-            "log_folder_name": self.log_folder_name,
-            # Backwards compatibility aliases
-            "raw_root_suffix": self.raw_folder_name,
-            "clean_root_suffix": self.clean_folder_name,
             "project_root": self.project_root,
+            "raw_root_suffix": self.raw_root_suffix,
+            "clean_root_suffix": self.clean_root_suffix,
+            "rename_log_folder_suffix": self.rename_log_folder_suffix,
+            # Backwards compatibility aliases
+            "raw_folder_name": self.raw_root_suffix,
+            "clean_folder_name": self.clean_root_suffix,
+            "log_folder_name": self.rename_log_folder_suffix,
             "full_window_s": self.full_window_s,
             "timeout_s": self.timeout_s,
             "global_trigger_keyword": self.global_trigger_keyword,
             "apply_global_keyword_to_all": self.apply_global_keyword_to_all,
             "test_keywords": list(self.test_keywords),
             "state_file": self.state_file,
-            "log_dir": self.log_folder_name,
+            "log_dir": self.rename_log_folder_suffix,
             "check_interval_s": self.check_interval_s,
             "motor_initial_csv": self.motor_initial_csv,
             "motor_history_csv": self.motor_history_csv,
@@ -144,17 +145,28 @@ class ShotLogConfig:
             folder = FolderConfig.from_dict(folder_dict)
             if folder.name:
                 folders[folder.name] = folder
-        raw_folder_name = data.get("raw_folder_name") or data.get("raw_root_suffix") or "ELI50069_RAW_DATA"
-        clean_folder_name = (
-            data.get("clean_folder_name") or data.get("clean_root_suffix") or "ELI50069_CLEAN_DATA"
+        raw_root_suffix = (
+            data.get("raw_root_suffix")
+            or data.get("raw_folder_name")
+            or "ELI50069_RAW_DATA"
         )
-        log_folder_name = data.get("log_folder_name") or data.get("log_dir") or "rename_log"
+        clean_root_suffix = (
+            data.get("clean_root_suffix")
+            or data.get("clean_folder_name")
+            or "ELI50069_CLEAN_DATA"
+        )
+        rename_log_folder_suffix = (
+            data.get("rename_log_folder_suffix")
+            or data.get("log_folder_name")
+            or data.get("log_dir")
+            or "rename_log"
+        )
 
         cfg = cls(
-            raw_folder_name=raw_folder_name,
-            clean_folder_name=clean_folder_name,
-            log_folder_name=log_folder_name,
             project_root=data.get("project_root"),
+            raw_root_suffix=raw_root_suffix,
+            clean_root_suffix=clean_root_suffix,
+            rename_log_folder_suffix=rename_log_folder_suffix,
             full_window_s=float(data.get("full_window_s", 10.0)),
             timeout_s=float(data.get("timeout_s", 20.0)),
             global_trigger_keyword=data.get("global_trigger_keyword", "shot"),
@@ -191,28 +203,36 @@ class ShotLogConfig:
 
     # Backwards compatibility aliases
     @property
-    def raw_root_suffix(self) -> str:
-        return self.raw_folder_name
+    def raw_folder_name(self) -> str:
+        return self.raw_root_suffix
 
-    @raw_root_suffix.setter
-    def raw_root_suffix(self, value: str) -> None:
-        self.raw_folder_name = value
+    @raw_folder_name.setter
+    def raw_folder_name(self, value: str) -> None:
+        self.raw_root_suffix = value
 
     @property
-    def clean_root_suffix(self) -> str:
-        return self.clean_folder_name
+    def clean_folder_name(self) -> str:
+        return self.clean_root_suffix
 
-    @clean_root_suffix.setter
-    def clean_root_suffix(self, value: str) -> None:
-        self.clean_folder_name = value
+    @clean_folder_name.setter
+    def clean_folder_name(self, value: str) -> None:
+        self.clean_root_suffix = value
 
     @property
     def log_dir(self) -> str:
-        return self.log_folder_name
+        return self.rename_log_folder_suffix
 
     @log_dir.setter
     def log_dir(self, value: str) -> None:
-        self.log_folder_name = value
+        self.rename_log_folder_suffix = value
+
+    @property
+    def log_folder_name(self) -> str:
+        return self.rename_log_folder_suffix
+
+    @log_folder_name.setter
+    def log_folder_name(self, value: str) -> None:
+        self.rename_log_folder_suffix = value
 
     def folder_matches(self, folder_name: str, filename_lower: str) -> bool:
         folder = self.folders.get(folder_name)
