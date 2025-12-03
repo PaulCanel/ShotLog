@@ -56,6 +56,7 @@ class SimulationState:
     raw_data_root: Path
     test_root: Path
     dest_raw_root: Path
+    raw_folder_name: str
     initial_csv_source: Path
     history_csv_source: Path
     initial_csv_dest: Path
@@ -99,14 +100,20 @@ class SimulationController:
     #  PREPARATION
     # ---------------------------
 
-    def _find_raw_data_root(self, root: Path) -> Path:
+    def _find_raw_data_root(self, root: Path, raw_folder_name: str) -> Path:
+        if raw_folder_name:
+            if root.name == raw_folder_name and root.is_dir():
+                return root
+            candidate = root / raw_folder_name
+            if candidate.is_dir():
+                return candidate
         if root.name.endswith("_RAW_DATA"):
             return root
         for child in root.iterdir():
             if child.is_dir() and child.name.endswith("_RAW_DATA"):
                 return child
         raise FileNotFoundError(
-            "Could not find a directory ending with '_RAW_DATA' in the selected RAW source root."
+            f"Could not find a RAW folder named '{raw_folder_name}' or ending with '_RAW_DATA' in the selected source root."
         )
 
     def _gather_raw_events(self, raw_data_root: Path) -> List[RawEvent]:
@@ -166,6 +173,7 @@ class SimulationController:
         cloud_period_s: float,
         *,
         day_filter: str,
+        raw_folder_name: str,
     ) -> SimulationState:
         if not raw_source.exists():
             raise FileNotFoundError(f"RAW source root not found: {raw_source}")
@@ -179,8 +187,8 @@ class SimulationController:
             raise ValueError("Test root must be outside the RAW source directory to avoid modifications.")
         test_root.mkdir(parents=True, exist_ok=True)
 
-        raw_data_root = self._find_raw_data_root(raw_source)
-        dest_raw_root = test_root / raw_data_root.name
+        raw_data_root = self._find_raw_data_root(raw_source, raw_folder_name)
+        dest_raw_root = test_root / (raw_folder_name or raw_data_root.name)
         initial_dest = test_root / initial_csv.name
         history_dest = test_root / history_csv.name
 
@@ -209,6 +217,7 @@ class SimulationController:
             raw_data_root=raw_data_root,
             test_root=test_root,
             dest_raw_root=dest_raw_root,
+            raw_folder_name=raw_folder_name or raw_data_root.name,
             initial_csv_source=initial_csv,
             history_csv_source=history_csv,
             initial_csv_dest=initial_dest,
@@ -374,6 +383,7 @@ class ShotLogSimulatorApp:
         self.controller = SimulationController(self.gui_queue)
 
         self.raw_source_var = tk.StringVar()
+        self.raw_folder_var = tk.StringVar(value="ELI50069_RAW_DATA")
         self.initial_csv_var = tk.StringVar()
         self.history_csv_var = tk.StringVar()
         self.test_root_var = tk.StringVar()
@@ -393,10 +403,17 @@ class ShotLogSimulatorApp:
         path_frame = tk.LabelFrame(self.root, text="Sources & Destination")
         path_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        self._add_path_row(path_frame, "RAW source root", self.raw_source_var, is_dir=True)
-        self._add_path_row(path_frame, "Motor initial CSV", self.initial_csv_var)
-        self._add_path_row(path_frame, "Motor history CSV", self.history_csv_var)
-        self._add_path_row(path_frame, "Test root destination", self.test_root_var, is_dir=True)
+        row = 0
+        self._add_path_row(path_frame, "RAW source root", self.raw_source_var, is_dir=True, row_index=row)
+        row += 1
+        tk.Label(path_frame, text="RAW folder name").grid(row=row, column=0, sticky="w")
+        tk.Entry(path_frame, textvariable=self.raw_folder_var, width=60).grid(row=row, column=1, padx=5)
+        row += 1
+        self._add_path_row(path_frame, "Motor initial CSV", self.initial_csv_var, row_index=row)
+        row += 1
+        self._add_path_row(path_frame, "Motor history CSV", self.history_csv_var, row_index=row)
+        row += 1
+        self._add_path_row(path_frame, "Test root destination", self.test_root_var, is_dir=True, row_index=row)
 
         params_frame = tk.LabelFrame(self.root, text="Simulation parameters")
         params_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -426,8 +443,10 @@ class ShotLogSimulatorApp:
         self.log_text = scrolledtext.ScrolledText(log_frame, height=15, state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-    def _add_path_row(self, parent: tk.Widget, label: str, var: tk.StringVar, *, is_dir: bool = False) -> None:
-        row = len(parent.grid_slaves()) // 3
+    def _add_path_row(
+        self, parent: tk.Widget, label: str, var: tk.StringVar, *, is_dir: bool = False, row_index: int | None = None
+    ) -> None:
+        row = row_index if row_index is not None else len(parent.grid_slaves()) // 3
         tk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
         tk.Entry(parent, textvariable=var, width=60).grid(row=row, column=1, padx=5)
         btn = tk.Button(parent, text="Browse...", command=lambda: self._browse(var, is_dir))
@@ -486,28 +505,31 @@ class ShotLogSimulatorApp:
         self._error("Could not parse start time. Use HH:MM:SS (e.g., 13:15:05).")
         raise ValueError
 
-    def _collect_paths(self) -> tuple[Path, Path, Path, Path]:
+    def _collect_paths(self) -> tuple[Path, Path, Path, Path, str]:
         raw_source = Path(self.raw_source_var.get().strip())
         initial_csv = Path(self.initial_csv_var.get().strip())
         history_csv = Path(self.history_csv_var.get().strip())
         test_root = Path(self.test_root_var.get().strip())
+        raw_folder_name = self.raw_folder_var.get().strip()
         missing = [name for name, path in [
             ("RAW source", raw_source),
             ("Initial CSV", initial_csv),
             ("Motor history CSV", history_csv),
             ("Test root", test_root),
         ] if not str(path)]
+        if not raw_folder_name:
+            missing.append("RAW folder name")
         if missing:
             self._error(f"Please provide all required paths: {', '.join(missing)}")
             raise ValueError
-        return raw_source, initial_csv, history_csv, test_root
+        return raw_source, initial_csv, history_csv, test_root, raw_folder_name
 
     # ---------------------------
     #  BUTTON HANDLERS
     # ---------------------------
 
     def _prepare_and_seed(self) -> None:
-        raw_source, initial_csv, history_csv, test_root = self._collect_paths()
+        raw_source, initial_csv, history_csv, test_root, raw_folder_name = self._collect_paths()
         jitter = self._get_float(self.jitter_var, default=0.0, minimum=0.0)
         cloud_period = self._get_float(self.cloud_period_var, default=30.0, minimum=0.1)
         start_time_obj = self._parse_start_time()
@@ -531,6 +553,7 @@ class ShotLogSimulatorApp:
                 jitter_s=jitter,
                 cloud_period_s=cloud_period,
                 day_filter=day_filter,
+                raw_folder_name=raw_folder_name,
             )
         except Exception as exc:
             self._error(str(exc))

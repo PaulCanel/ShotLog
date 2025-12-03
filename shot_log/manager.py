@@ -65,20 +65,18 @@ class ShotManager:
     def __init__(
         self, root_path: str, config: ShotLogConfig, gui_queue: queue.Queue, manual_date_str: str | None = None
     ):
-        self.root_path = Path(root_path).resolve()
         self.config = config.clone()
+        self.root_path = Path(self.config.project_root or root_path).resolve()
         self.gui_queue = gui_queue
 
-        self.raw_root = self.root_path / self.config.raw_root_suffix
-        self.clean_root = self.root_path / self.config.clean_root_suffix
-
-        self.state_file = self.root_path / self.config.state_file
-        self.log_dir = self.root_path / self.config.log_dir
+        self._apply_path_config()
         self.motor_state_manager: MotorStateManager | None = None
         self._motor_sources_mtime: dict[str, float] | None = None
         self._refresh_motor_paths()
         self.manual_params = list(self.config.manual_params)
         self._refresh_manual_params_path()
+        ensure_dir(self.raw_root)
+        ensure_dir(self.clean_root)
         ensure_dir(self.log_dir)
 
         self.running = False
@@ -110,6 +108,7 @@ class ShotManager:
 
         # Logging
         self._setup_logging()
+        self._log_current_paths()
         self._ensure_expected_cameras(log_prefix="Initial expected cameras")
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
         self.log_keyword_config()
@@ -123,6 +122,13 @@ class ShotManager:
         if not target.is_absolute():
             target = self.root_path / target
         return target
+
+    def _apply_path_config(self):
+        self.config.project_root = str(self.root_path)
+        self.raw_root = self.root_path / self.config.raw_folder_name
+        self.clean_root = self.root_path / self.config.clean_folder_name
+        self.log_dir = self.root_path / self.config.log_folder_name
+        self.state_file = self.root_path / self.config.state_file
 
     def _refresh_motor_paths(self):
         self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
@@ -188,6 +194,11 @@ class ShotManager:
             self.logger.error(msg)
         else:
             self.logger.debug(msg)
+
+    def _log_current_paths(self):
+        self._log("INFO", f"Using RAW folder: {self.raw_root}")
+        self._log("INFO", f"Using CLEAN folder: {self.clean_root}")
+        self._log("INFO", f"Using log folder: {self.log_dir}")
 
     # ---------------------------
     # STATE LOAD / SAVE
@@ -624,18 +635,43 @@ class ShotManager:
 
     def update_config(self, new_config: ShotLogConfig):
         with self.lock:
+            previous_raw_root = getattr(self, "raw_root", None)
+            previous_log_dir = getattr(self, "log_dir", None)
+
             self.config = new_config.clone()
-            self.raw_root = self.root_path / self.config.raw_root_suffix
-            self.clean_root = self.root_path / self.config.clean_root_suffix
+            self.root_path = Path(self.config.project_root or self.root_path).resolve()
+            self._apply_path_config()
             self._refresh_motor_paths()
             self.manual_params = list(self.config.manual_params)
             self._refresh_manual_params_path()
             ensured_expected = self._ensure_expected_cameras()
+
+        ensure_dir(self.raw_root)
+        ensure_dir(self.clean_root)
+        ensure_dir(self.log_dir)
+
+        if previous_log_dir and previous_log_dir != self.log_dir:
+            for handler in list(self.logger.handlers):
+                self.logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+            self._setup_logging()
+
         self._log(
             "INFO",
             f"Configuration updated for running manager. Expected cameras: {ensured_expected}",
         )
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
+        self._log_current_paths()
+
+        if self.running and previous_raw_root and previous_raw_root != self.raw_root:
+            if self.observer:
+                self.observer.stop()
+                self.observer.join(timeout=5.0)
+                self.observer = None
+            self._start_observer()
         self.log_keyword_config()
 
     def set_manual_date(self, date_str: str | None):
