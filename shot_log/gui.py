@@ -27,6 +27,10 @@ class ShotManagerGUI:
         self.manager = None
 
         self.config = DEFAULT_CONFIG.clone()
+        self.var_root = tk.StringVar(value=self.config.project_root or "")
+        self.var_raw_folder = tk.StringVar(value=self.config.raw_folder_name)
+        self.var_clean_folder = tk.StringVar(value=self.config.clean_folder_name)
+        self.var_log_folder = tk.StringVar(value=self.config.log_folder_name)
         self.var_date_mode = tk.StringVar(value="auto")
         self.var_manual_date = tk.StringVar(value="")
         self.trigger_cam_vars = {}
@@ -44,6 +48,7 @@ class ShotManagerGUI:
 
         self._build_gui()
         self._update_date_mode_label()
+        self._update_path_labels()
         self._reset_manual_state()
 
         self.root.after(200, self._poll_log_queue)
@@ -79,15 +84,37 @@ class ShotManagerGUI:
             lambda e: self.content_canvas.itemconfigure(self._content_window, width=e.width),
         )
 
-        # Project root
-        frm_root = ttk.LabelFrame(self.content_frame, text="Project Root")
+        # Project root and folders
+        frm_root = ttk.LabelFrame(self.content_frame, text="Paths")
         frm_root.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(frm_root, text="Root folder (contains ELI50069_RAW_DATA / CLEAN_DATA):") \
-            .grid(row=0, column=0, sticky="w")
-        self.var_root = tk.StringVar()
+        ttk.Label(frm_root, text="Base root:").grid(row=0, column=0, sticky="w")
         ttk.Entry(frm_root, textvariable=self.var_root, width=60).grid(row=0, column=1, sticky="we", padx=5)
         ttk.Button(frm_root, text="Browse", command=self._choose_root).grid(row=0, column=2, padx=5)
+
+        ttk.Label(frm_root, text="RAW folder name:").grid(row=1, column=0, sticky="w")
+        ttk.Entry(frm_root, textvariable=self.var_raw_folder, width=30).grid(row=1, column=1, sticky="w", padx=5)
+
+        ttk.Label(frm_root, text="CLEAN folder name:").grid(row=2, column=0, sticky="w")
+        ttk.Entry(frm_root, textvariable=self.var_clean_folder, width=30).grid(row=2, column=1, sticky="w", padx=5)
+
+        ttk.Label(frm_root, text="LOG folder name:").grid(row=3, column=0, sticky="w")
+        ttk.Entry(frm_root, textvariable=self.var_log_folder, width=30).grid(row=3, column=1, sticky="w", padx=5)
+
+        ttk.Button(frm_root, text="Apply paths", command=self._apply_paths).grid(row=4, column=0, padx=5, pady=5, sticky="w")
+
+        ttk.Label(frm_root, text="RAW data folder:").grid(row=5, column=0, sticky="w")
+        self.lbl_raw_path = ttk.Label(frm_root, text="-")
+        self.lbl_raw_path.grid(row=5, column=1, columnspan=2, sticky="w")
+
+        ttk.Label(frm_root, text="CLEAN data folder:").grid(row=6, column=0, sticky="w")
+        self.lbl_clean_path = ttk.Label(frm_root, text="-")
+        self.lbl_clean_path.grid(row=6, column=1, columnspan=2, sticky="w")
+
+        ttk.Label(frm_root, text="Log folder:").grid(row=7, column=0, sticky="w")
+        self.lbl_log_path = ttk.Label(frm_root, text="-")
+        self.lbl_log_path.grid(row=7, column=1, columnspan=2, sticky="w")
+
         frm_root.columnconfigure(1, weight=1)
 
         frm_date = ttk.LabelFrame(self.content_frame, text="Shot Date")
@@ -394,6 +421,7 @@ class ShotManagerGUI:
         d = filedialog.askdirectory(title="Choose project root")
         if d:
             self.var_root.set(d)
+            self._update_path_labels()
 
     def _open_manual_date_dialog(self):
         top = tk.Toplevel(self.root)
@@ -512,6 +540,9 @@ class ShotManagerGUI:
         except ValueError:
             messagebox.showerror("Error", "Full window and timeout must be numeric.")
         cfg.project_root = self.var_root.get().strip() or None
+        cfg.raw_folder_name = self.var_raw_folder.get().strip() or cfg.raw_folder_name
+        cfg.clean_folder_name = self.var_clean_folder.get().strip() or cfg.clean_folder_name
+        cfg.log_folder_name = self.var_log_folder.get().strip() or cfg.log_folder_name
         if self.var_date_mode.get() == "manual":
             cfg.manual_date_override = self.var_manual_date.get().strip() or None
         else:
@@ -560,6 +591,73 @@ class ShotManagerGUI:
             self.manager.resume()
             self.btn_pause.configure(state="normal")
             self.btn_resume.configure(state="disabled")
+
+    def _update_path_labels(
+        self,
+        *,
+        raw_path: Path | None = None,
+        clean_path: Path | None = None,
+        log_path: Path | None = None,
+    ):
+        if self.manager:
+            raw_val = raw_path or getattr(self.manager, "raw_root", None)
+            clean_val = clean_path or getattr(self.manager, "clean_root", None)
+            log_val = log_path or getattr(self.manager, "log_dir", None)
+        else:
+            base_root_str = self.var_root.get().strip()
+            base_root = Path(base_root_str) if base_root_str else None
+            raw_name = self.var_raw_folder.get().strip() or self.config.raw_folder_name
+            clean_name = self.var_clean_folder.get().strip() or self.config.clean_folder_name
+            log_name = self.var_log_folder.get().strip() or self.config.log_folder_name
+            raw_val = raw_path or (base_root / raw_name if base_root else None)
+            clean_val = clean_path or (base_root / clean_name if base_root else None)
+            log_val = log_path or (base_root / log_name if base_root else None)
+
+        self.lbl_raw_path.configure(text=str(raw_val) if raw_val else "-")
+        self.lbl_clean_path.configure(text=str(clean_val) if clean_val else "-")
+        self.lbl_log_path.configure(text=str(log_val) if log_val else "-")
+
+    def _apply_paths(self):
+        base_root = self.var_root.get().strip()
+        raw_name = self.var_raw_folder.get().strip()
+        clean_name = self.var_clean_folder.get().strip()
+        log_name = self.var_log_folder.get().strip()
+
+        if not base_root:
+            messagebox.showerror("Error", "Please choose a base root directory.")
+            return
+        if not os.path.isdir(base_root):
+            messagebox.showerror("Error", f"Invalid root directory: {base_root}")
+            return
+
+        for label, value in (("RAW folder name", raw_name), ("CLEAN folder name", clean_name), ("LOG folder name", log_name)):
+            if not value:
+                messagebox.showerror("Error", f"{label} cannot be empty.")
+                return
+
+        root_path = Path(base_root)
+        raw_path = root_path / raw_name
+        clean_path = root_path / clean_name
+        log_path = root_path / log_name
+
+        for path in (raw_path, clean_path, log_path):
+            path.mkdir(parents=True, exist_ok=True)
+
+        self.config.project_root = base_root
+        self.config.raw_folder_name = raw_name
+        self.config.clean_folder_name = clean_name
+        self.config.log_folder_name = log_name
+
+        runtime_config = self._build_runtime_config()
+        self.config = runtime_config.clone()
+        if self.manager:
+            self.manager.update_config(runtime_config)
+
+        self._append_log(f"[INFO] Using RAW folder: {raw_path}")
+        self._append_log(f"[INFO] Using CLEAN folder: {clean_path}")
+        self._append_log(f"[INFO] Using log folder: {log_path}")
+        self._append_log("[INFO] Paths applied successfully.")
+        self._update_path_labels(raw_path=raw_path, clean_path=clean_path, log_path=log_path)
 
     def _stop(self):
         if self.manager:
@@ -1153,6 +1251,11 @@ class ShotManagerGUI:
                 self.var_date_mode.set("auto")
                 self.var_manual_date.set("")
             self._update_date_mode_label()
+            self._append_log(
+                f"[INFO] Loaded paths: RAW='{self.config.raw_folder_name}', "
+                f"CLEAN='{self.config.clean_folder_name}', LOG='{self.config.log_folder_name}'"
+            )
+            self._apply_paths()
             self._apply_timing(apply_to_manager=True)
             self._apply_keyword()
             self._after_config_changed()
@@ -1174,6 +1277,11 @@ class ShotManagerGUI:
                 self._append_log(f"[INFO] {line}")
 
     def _refresh_from_config(self):
+        if self.config.project_root:
+            self.var_root.set(self.config.project_root)
+        self.var_raw_folder.set(self.config.raw_folder_name)
+        self.var_clean_folder.set(self.config.clean_folder_name)
+        self.var_log_folder.set(self.config.log_folder_name)
         self.var_window.set(str(self.config.full_window_s))
         self.var_timeout.set(str(self.config.timeout_s))
         self.var_global_kw.set(self.config.global_trigger_keyword)
@@ -1194,6 +1302,7 @@ class ShotManagerGUI:
         self.lbl_timing.configure(
             text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
         )
+        self._update_path_labels()
 
     # ---------------------------
     # LOG POLLING
@@ -1226,6 +1335,7 @@ class ShotManagerGUI:
     def _update_status_labels(self):
         if self.manager:
             st = self.manager.get_status()
+            self._update_path_labels()
             self._handle_manual_params_status(st)
             if st.get("manual_date_str") and self.var_date_mode.get() != "manual":
                 self.var_date_mode.set("manual")
@@ -1288,6 +1398,7 @@ class ShotManagerGUI:
                 text=f"window={st['full_window']} / timeout={st['timeout']}"
             )
         else:
+            self._update_path_labels()
             self.lbl_system.configure(text="IDLE")
             self.lbl_open.configure(text="0")
             self.lbl_last.configure(text="-")
