@@ -66,7 +66,8 @@ class ShotManager:
         self, root_path: str, config: ShotLogConfig, gui_queue: queue.Queue, manual_date_str: str | None = None
     ):
         self.config = config.clone()
-        self.root_path = Path(self.config.project_root or root_path).resolve()
+        self.project_root = Path(self.config.project_root or root_path).resolve()
+        self.root_path = self.project_root
         self.gui_queue = gui_queue
 
         self._apply_path_config()
@@ -75,6 +76,7 @@ class ShotManager:
         self._refresh_motor_paths()
         self.manual_params = list(self.config.manual_params)
         self._refresh_manual_params_path()
+        raw_root_exists = self.raw_root.exists()
         ensure_dir(self.raw_root)
         ensure_dir(self.clean_root)
         ensure_dir(self.log_dir)
@@ -109,6 +111,8 @@ class ShotManager:
         # Logging
         self._setup_logging()
         self._log_current_paths()
+        if not raw_root_exists:
+            self._log("WARNING", f"RAW root does not exist: {self.raw_root}")
         self._ensure_expected_cameras(log_prefix="Initial expected cameras")
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
         self.log_keyword_config()
@@ -124,11 +128,22 @@ class ShotManager:
         return target
 
     def _apply_path_config(self):
-        self.config.project_root = str(self.root_path)
-        self.raw_root = self.root_path / self.config.raw_folder_name
-        self.clean_root = self.root_path / self.config.clean_folder_name
-        self.log_dir = self.root_path / self.config.log_folder_name
-        self.state_file = self.root_path / self.config.state_file
+        base_root = self.project_root
+        if (
+            base_root.name == self.config.raw_root_suffix
+            and not (base_root / self.config.raw_root_suffix).exists()
+        ):
+            base_root = base_root.parent
+            self.raw_root = self.project_root
+        else:
+            self.raw_root = base_root / self.config.raw_root_suffix
+
+        self.project_root = base_root
+        self.root_path = base_root
+        self.config.project_root = str(base_root)
+        self.clean_root = base_root / self.config.clean_root_suffix
+        self.log_dir = base_root / self.config.rename_log_folder_suffix
+        self.state_file = base_root / self.config.state_file
 
     def _refresh_motor_paths(self):
         self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
@@ -196,9 +211,10 @@ class ShotManager:
             self.logger.debug(msg)
 
     def _log_current_paths(self):
-        self._log("INFO", f"Using RAW folder: {self.raw_root}")
-        self._log("INFO", f"Using CLEAN folder: {self.clean_root}")
-        self._log("INFO", f"Using log folder: {self.log_dir}")
+        self._log("INFO", f"Project root = {self.project_root}")
+        self._log("INFO", f"RAW root    = {self.raw_root}")
+        self._log("INFO", f"CLEAN root  = {self.clean_root}")
+        self._log("INFO", f"Log folder  = {self.log_dir}")
 
     # ---------------------------
     # STATE LOAD / SAVE
@@ -637,15 +653,16 @@ class ShotManager:
         with self.lock:
             previous_raw_root = getattr(self, "raw_root", None)
             previous_log_dir = getattr(self, "log_dir", None)
-
             self.config = new_config.clone()
-            self.root_path = Path(self.config.project_root or self.root_path).resolve()
+            self.project_root = Path(self.config.project_root or self.root_path).resolve()
+            self.root_path = self.project_root
             self._apply_path_config()
             self._refresh_motor_paths()
             self.manual_params = list(self.config.manual_params)
             self._refresh_manual_params_path()
             ensured_expected = self._ensure_expected_cameras()
 
+        raw_root_exists = self.raw_root.exists()
         ensure_dir(self.raw_root)
         ensure_dir(self.clean_root)
         ensure_dir(self.log_dir)
@@ -665,6 +682,8 @@ class ShotManager:
         )
         self._log("INFO", f"Trigger cameras (from folder configs): {self.config.trigger_folders}")
         self._log_current_paths()
+        if not raw_root_exists:
+            self._log("WARNING", f"RAW root does not exist: {self.raw_root}")
 
         if self.running and previous_raw_root and previous_raw_root != self.raw_root:
             if self.observer:
