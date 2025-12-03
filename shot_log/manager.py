@@ -569,9 +569,21 @@ class ShotManager:
         # PollingObserver everywhere (robust with cloud / network and no inotify limits)
         self._log("INFO", "Using PollingObserver (cross-platform polling mode).")
         self.observer = PollingObserver()
+
+        observer_type = type(self.observer).__name__
+        self._log("INFO", f"Observer type: {observer_type}")
+
+        raw_root_resolved = self.raw_root.resolve()
+        if not self.raw_root.exists():
+            self._log("WARNING", f"Watchdog path does not exist: {raw_root_resolved}")
+        else:
+            self._log("INFO", f"Watchdog path exists: {raw_root_resolved}")
+
+        self._log("INFO", f"Scheduling watchdog on path: {raw_root_resolved} (recursive=True)")
         self.observer.schedule(handler, str(self.raw_root), recursive=True)
 
         try:
+            self._log("INFO", "Starting watchdog observer.")
             self.observer.start()
             self._log("INFO", "Watchdog observer started on RAW root.")
         except OSError as e:
