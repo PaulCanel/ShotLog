@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
@@ -86,7 +86,7 @@ def _parse_float(value: str) -> Optional[float]:
         return None
 
 
-def _parse_datetime(value: str) -> Optional[datetime]:
+def _parse_datetime(value: str, *, fallback_date: date | None = None) -> Optional[datetime]:
     value = value.strip()
     if not value:
         return None
@@ -96,6 +96,14 @@ def _parse_datetime(value: str) -> Optional[datetime]:
         lambda v: datetime.strptime(v, "%Y/%m/%d %H:%M:%S"),
         lambda v: datetime.strptime(v, "%d/%m/%Y %H:%M:%S"),
     ]
+    if fallback_date is not None:
+        parsers.append(
+            lambda v: datetime.strptime(v, "%H:%M:%S").replace(
+                year=fallback_date.year,
+                month=fallback_date.month,
+                day=fallback_date.day,
+            )
+        )
     for parser in parsers:
         try:
             return parser(value)
@@ -145,7 +153,9 @@ def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> Dict[
     return positions
 
 
-def parse_motor_history(path: Path, logger: LoggerFn | None = None) -> List[MotorEvent]:
+def parse_motor_history(
+    path: Path, logger: LoggerFn | None = None, *, fallback_date: date | None = None
+) -> List[MotorEvent]:
     """Parse the motor movement history CSV.
 
     The parser searches for time, motor, old position and new position columns.
@@ -179,7 +189,7 @@ def parse_motor_history(path: Path, logger: LoggerFn | None = None) -> List[Moto
                     f"Skipping row {row_idx}: missing motor or timestamp",
                 )
                 continue
-            dt = _parse_datetime(raw_time)
+            dt = _parse_datetime(raw_time, fallback_date=fallback_date)
             if dt is None:
                 _log_message(
                     logger,
