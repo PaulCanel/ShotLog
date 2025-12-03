@@ -1,0 +1,72 @@
+{
+  "project_root": "/home/paul/Documents/GitHub/ShotLog",
+  "raw_folder_name": "ELI50069_RAW_DATA",
+  "motor_folder_name": "motors",
+  "date": "2025-12-02",
+  "max_delay_sec": 5.0,
+  "cameras": [
+    {
+      "name": "Lanex1",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex2",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex3",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex4",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex5",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Csi",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lyso",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    }
+  ]
+}
