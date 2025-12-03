@@ -292,7 +292,7 @@ class SimulationController:
             "INFO",
             f"Seeding motor history with {len(pre_motor)} events up to {start_time}.",
         )
-        self._write_motor_history(prefill=pre_motor)
+        self._write_motor_history(preset_events=pre_motor)
 
         self.state.raw_events = sorted(future_raw, key=lambda e: e.visible_time)
         self.state.motor_events = sorted(future_motor, key=lambda e: e.visible_time)
@@ -557,10 +557,8 @@ class ShotLogSimulatorApp:
         if self.controller.running:
             return
         if self.controller.state is None or self.controller.last_seed_start is None:
-            try:
-                self._prepare_and_seed()
-            except Exception:
-                return
+            self._error("Please set a start time first (use 'Set start time').")
+            return
         try:
             self.controller.start_loop()
             self.start_btn.configure(state=tk.DISABLED)
