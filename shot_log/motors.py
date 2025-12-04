@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ class MotorEvent:
     motor: str  # Motor name (not the axis identifier)
     old_pos: float | None
     new_pos: float | None
+    time_only: bool = False
 
 
 class MotorStateManager:
@@ -43,7 +45,10 @@ class MotorStateManager:
 
         positions: Dict[str, float | None] = {k: v for k, v in self.initial_positions.items()}
         for event in self.events:
-            if event.time > t:
+            event_time = event.time
+            if event.time_only:
+                event_time = event_time.replace(year=t.year, month=t.month, day=t.day)
+            if event_time > t:
                 break
             if event.motor not in positions and event.motor not in self.motor_names:
                 self.motor_names.add(event.motor)
@@ -86,10 +91,24 @@ def _parse_float(value: str) -> Optional[float]:
         return None
 
 
-def _parse_datetime(value: str, *, fallback_date: date | None = None) -> Optional[datetime]:
+def _parse_datetime(value: str, *, fallback_date: date | None = None) -> tuple[Optional[datetime], bool]:
     value = value.strip()
     if not value:
-        return None
+        return None, False
+
+    # Handle time-only inputs (HH:MM:SS) by anchoring them to the fallback date (or today)
+    if re.fullmatch(r"\d{1,2}:\d{2}:\d{2}", value):
+        base_date = fallback_date or date.today()
+        try:
+            dt = datetime.strptime(value, "%H:%M:%S").replace(
+                year=base_date.year,
+                month=base_date.month,
+                day=base_date.day,
+            )
+            return dt, True
+        except Exception:
+            pass
+
     parsers = [
         datetime.fromisoformat,
         lambda v: datetime.strptime(v, "%Y-%m-%d %H:%M:%S"),
@@ -106,10 +125,10 @@ def _parse_datetime(value: str, *, fallback_date: date | None = None) -> Optiona
         )
     for parser in parsers:
         try:
-            return parser(value)
+            return parser(value), False
         except Exception:
             continue
-    return None
+    return None, False
 
 
 def parse_initial_positions(path: Path, logger: LoggerFn | None = None) -> tuple[Dict[str, float], Dict[str, str]]:
@@ -185,7 +204,9 @@ def parse_motor_history(
     """Parse the motor movement history CSV.
 
     The parser searches for time, motor, old position and new position columns.
-    Rows without a usable timestamp or motor are skipped with a warning.
+    Rows without a usable timestamp or motor are skipped with a warning. Time-only
+    values (``HH:MM:SS``) are anchored to ``fallback_date`` (or today) and marked
+    so they can be projected onto the shot date when computing positions.
     """
 
     if not path.exists():
@@ -215,7 +236,7 @@ def parse_motor_history(
                     f"Skipping row {row_idx}: missing motor or timestamp",
                 )
                 continue
-            dt = _parse_datetime(raw_time, fallback_date=fallback_date)
+            dt, time_only = _parse_datetime(raw_time, fallback_date=fallback_date)
             if dt is None:
                 _log_message(
                     logger,
@@ -236,7 +257,15 @@ def parse_motor_history(
 
             old_pos = _parse_float(row.get(old_col, "")) if old_col else None
             new_pos = _parse_float(row.get(new_col, ""))
-            events.append(MotorEvent(time=dt, motor=motor_name, old_pos=old_pos, new_pos=new_pos))
+            events.append(
+                MotorEvent(
+                    time=dt,
+                    motor=motor_name,
+                    old_pos=old_pos,
+                    new_pos=new_pos,
+                    time_only=time_only,
+                )
+            )
     events.sort(key=lambda e: e.time)
     return events
 

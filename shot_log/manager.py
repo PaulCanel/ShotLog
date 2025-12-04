@@ -8,7 +8,7 @@ import re
 import shutil
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
@@ -224,6 +224,15 @@ class ShotManager:
             return self.last_seen_date_str
         return datetime.now().strftime("%Y%m%d")
 
+    def _get_motor_history_fallback_date(self) -> date:
+        """Return a date used to anchor time-only motor events."""
+
+        date_str = self._get_active_date_str()
+        try:
+            return datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            return datetime.now().date()
+
     # ---------------------------
     # LOGGING
     # ---------------------------
@@ -335,7 +344,10 @@ class ShotManager:
                 self.motor_initial_path, logger=self._log
             )
             events = parse_motor_history(
-                self.motor_history_path, logger=self._log, axis_to_motor=axis_to_motor
+                self.motor_history_path,
+                logger=self._log,
+                axis_to_motor=axis_to_motor,
+                fallback_date=self._get_motor_history_fallback_date(),
             )
             self.motor_state_manager = MotorStateManager(initial_positions, events)
             self._motor_sources_mtime = mtimes
