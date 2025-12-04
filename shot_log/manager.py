@@ -106,6 +106,11 @@ class ShotManager:
         self.manual_date_str: str | None = manual_date_str or self.config.manual_date_override
         self.last_seen_date_str: str | None = None
 
+        self._default_manual_params_path: Path | None = None
+        self._default_manual_clean_root: Path | None = None
+        self._default_motor_positions_path: Path | None = None
+        self._default_motor_clean_root: Path | None = None
+
         self._apply_path_config()
         self.motor_state_manager: MotorStateManager | None = None
         self._motor_sources_mtime: dict[str, float] | None = None
@@ -161,7 +166,16 @@ class ShotManager:
             target = self.root_path / target
         return target
 
+    def _reset_manual_default_path(self):
+        self._default_manual_params_path = None
+        self._default_manual_clean_root = None
+
+    def _reset_motor_default_path(self):
+        self._default_motor_positions_path = None
+        self._default_motor_clean_root = None
+
     def _apply_path_config(self):
+        previous_clean_root = getattr(self, "clean_root", None)
         base_root = self.project_root
         if (
             base_root.name == self.config.raw_root_suffix
@@ -179,13 +193,25 @@ class ShotManager:
         self.log_dir = base_root / self.config.rename_log_folder_suffix
         self.state_file = base_root / self.config.state_file
 
+        if previous_clean_root and previous_clean_root != self.clean_root:
+            self._reset_manual_default_path()
+            self._reset_motor_default_path()
+
     def _refresh_motor_paths(self):
         self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
         self.motor_history_path = self._resolve_path(self.config.motor_history_csv)
         if self.config.use_default_motor_positions_path:
-            date_str = self._get_active_date_str()
-            self.motor_positions_output = (self.clean_root / f"shot_motor_positions_{date_str}.csv").resolve()
+            if self._default_motor_clean_root != self.clean_root:
+                self._reset_motor_default_path()
+                self._default_motor_clean_root = self.clean_root
+            if self._default_motor_positions_path is None:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                motor_dir = self.clean_root / "motors_parameters"
+                ensure_dir(motor_dir)
+                self._default_motor_positions_path = (motor_dir / f"shot_motor_positions_{stamp}.csv").resolve()
+            self.motor_positions_output = self._default_motor_positions_path
         else:
+            self._reset_motor_default_path()
             path = self._resolve_path(
                 self.config.motor_positions_output, default="motor_positions_by_shot.csv"
             )
@@ -193,9 +219,17 @@ class ShotManager:
 
     def _refresh_manual_params_path(self):
         if self.config.use_default_manual_params_path:
-            date_str = self._get_active_date_str()
-            self.manual_params_csv_path = (self.clean_root / f"shot_manual_params_{date_str}.csv").resolve()
+            if self._default_manual_clean_root != self.clean_root:
+                self._reset_manual_default_path()
+                self._default_manual_clean_root = self.clean_root
+            if self._default_manual_params_path is None:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                manual_dir = self.clean_root / "manual_parameters"
+                ensure_dir(manual_dir)
+                self._default_manual_params_path = (manual_dir / f"shot_manual_params_{stamp}.csv").resolve()
+            self.manual_params_csv_path = self._default_manual_params_path
         else:
+            self._reset_manual_default_path()
             path = self._resolve_path(
                 self.config.manual_params_csv_path, default="manual_params_by_shot.csv"
             )
