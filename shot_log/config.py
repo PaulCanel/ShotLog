@@ -4,7 +4,7 @@ The JSON produced by :func:`ShotLogConfig.to_dict` has a flat structure
 containing root suffixes, timing parameters, keyword options and a
 "folders" array. Each folder entry includes its name, the "expected" and
 "trigger" flags plus a list of ``file_specs`` with ``keyword`` and
-``extension`` fields. The format is intentionally simple to allow manual
+``extensions`` fields. The format is intentionally simple to allow manual
 editing when needed.
 """
 from __future__ import annotations
@@ -20,14 +20,41 @@ def _normalize_extension(ext: str) -> str:
     return ext
 
 
+def _parse_extensions_field(raw_ext_field):
+    """Return a normalized list of extensions from a string or list input."""
+
+    if raw_ext_field is None:
+        return []
+
+    parts: List[str]
+    if isinstance(raw_ext_field, list):
+        parts = [str(x) for x in raw_ext_field]
+    else:
+        parts = str(raw_ext_field).split(",")
+
+    extensions: List[str] = []
+    for part in parts:
+        normalized = _normalize_extension(part)
+        if normalized:
+            extensions.append(normalized)
+    return extensions
+
+
 @dataclass
 class FolderFileSpec:
     keyword: str = ""
-    extension: str = ""
+    extensions: List[str] = field(default_factory=list)
+
+    @property
+    def normalized_extensions(self) -> List[str]:
+        return [_normalize_extension(ext) for ext in self.extensions if _normalize_extension(ext)]
 
     @property
     def normalized_extension(self) -> str:
-        return _normalize_extension(self.extension)
+        """Backwards-compatible single extension (first in list or empty)."""
+
+        exts = self.normalized_extensions
+        return exts[0] if exts else ""
 
     def matches(self, filename_lower: str, *, global_keyword: str, apply_global_keyword: bool) -> bool:
         """
@@ -35,22 +62,32 @@ class FolderFileSpec:
         insensitive and optionally enforces the global keyword when the
         configuration requires it.
         """
+
         if apply_global_keyword and global_keyword:
             if global_keyword.lower() not in filename_lower:
                 return False
         if self.keyword and self.keyword.lower() not in filename_lower:
             return False
-        ext = _normalize_extension(self.extension)
-        if ext and not filename_lower.endswith(ext):
-            return False
-        return True
+
+        extensions = self.normalized_extensions
+        if not extensions:
+            return True
+        return any(filename_lower.endswith(ext) for ext in extensions)
 
     def to_dict(self) -> dict:
-        return {"keyword": self.keyword, "extension": self.extension}
+        extensions = self.normalized_extensions
+        return {
+            "keyword": self.keyword,
+            "extensions": extensions,
+            "extension": extensions[0] if extensions else "",
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "FolderFileSpec":
-        return cls(keyword=data.get("keyword", ""), extension=data.get("extension", ""))
+        extensions = _parse_extensions_field(data.get("extensions"))
+        if not extensions and "extension" in data:
+            extensions = _parse_extensions_field(data.get("extension"))
+        return cls(keyword=data.get("keyword", ""), extensions=extensions)
 
 
 @dataclass
@@ -277,8 +314,13 @@ class ShotLogConfig:
                 continue
 
             for idx, spec in enumerate(folder.file_specs, start=1):
-                ext = spec.normalized_extension
-                ext_desc = f"ext='{ext}'" if ext else "ext='' (no extension filter)"
+                extensions = spec.normalized_extensions
+                if not extensions:
+                    ext_desc = "ext='' (no extension filter)"
+                elif len(extensions) == 1:
+                    ext_desc = f"ext='{extensions[0]}'"
+                else:
+                    ext_desc = f"ext in {extensions}"
                 if use_global:
                     if spec.keyword:
                         kw_desc = (
@@ -317,7 +359,7 @@ def default_folders() -> Dict[str, FolderConfig]:
             name=name,
             expected=True,
             trigger=(name in ["Lanex5"]),
-            file_specs=[FolderFileSpec(keyword="", extension=".tif")],
+            file_specs=[FolderFileSpec(keyword="", extensions=[".tif"])],
         )
     return folders
 
