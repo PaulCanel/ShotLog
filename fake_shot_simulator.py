@@ -11,7 +11,7 @@ Configuration à modifier en haut du fichier :
 - RAW_FOLDER_NAME
 - MOTOR_FOLDER_NAME
 - CAMERA_CONFIG
-- DELAY_* et SHOT_DATE
+- DELAY_*
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ MOTOR_FOLDER_NAME = "motors"
 
 # Date logique des shots (celle qui sera utilisée pour les sous-dossiers de date)
 # Calculée une seule fois au lancement pour conserver la même valeur durant la session
+# (non configurable, jamais sauvegardée en config)
 SHOT_DATE = datetime.today().date()
 
 # Délais min / max autour du trigger (en secondes) pour les fichiers de chaque caméra
@@ -369,7 +370,6 @@ class FakeShotSimulator:
             "raw_subfolder_name": self.raw_subfolder_name,
             "motor_subfolder_name": self.motor_subfolder_name,
             "initial_csv_path": str(self.initial_csv_path) if self.initial_csv_path else "",
-            "date": self.date.isoformat(),
             "max_delay_sec": self.max_delay_sec,
             "cameras": [
                 {
@@ -387,10 +387,6 @@ class FakeShotSimulator:
         root_str = cfg.get("sim_root") or cfg.get("project_root") or ""
         if root_str:
             self.set_project_root(Path(root_str))
-
-        date_str = cfg.get("date")
-        if date_str:
-            self.date = datetime.fromisoformat(date_str).date()
 
         md = cfg.get("max_delay_sec")
         if md is not None:
