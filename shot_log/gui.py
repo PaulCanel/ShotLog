@@ -1,9 +1,8 @@
 from __future__ import annotations
-
-import csv
 import json
 import os
 import queue
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -14,11 +13,12 @@ from .config import (
     DEFAULT_CONFIG,
     FolderConfig,
     FolderFileSpec,
+    ManualParam,
     ShotLogConfig,
     _parse_extensions_field,
 )
 from .manager import ShotManager
-from .manual_params import build_empty_manual_values
+from .manual_params import build_empty_manual_values, write_manual_params_row
 
 # ============================================================
 #  TKINTER GUI
@@ -66,6 +66,8 @@ class ShotManagerGUI:
         self.btn_manual_params_browse: ttk.Button | None = None
         self.ent_motor_output: ttk.Entry | None = None
         self.btn_motor_output_browse: ttk.Button | None = None
+
+        self._number_validator = self.root.register(self._validate_number_entry)
 
         self._build_gui()
         self._update_date_mode_label()
@@ -702,7 +704,7 @@ class ShotManagerGUI:
         cfg.motor_history_csv = self.var_motor_history.get()
         cfg.motor_positions_output = self._normalize_csv_path_str(self.var_motor_output.get()) or ""
         cfg.use_default_motor_positions_path = self.var_use_default_motor_output.get()
-        cfg.manual_params = list(self.config.manual_params)
+        cfg.manual_params = [ManualParam(name=p.name, type=p.type) for p in self.config.manual_params]
         cfg.manual_params_csv_path = self._normalize_csv_path_str(
             self.var_manual_params_csv.get()
         )
@@ -1059,31 +1061,55 @@ class ShotManagerGUI:
         top = tk.Toplevel(self.root)
         top.title("Manual parameters")
 
-        params = list(self.config.manual_params)
+        params = [ManualParam(p.name, p.type) for p in self.config.manual_params]
 
         lst = tk.Listbox(top, height=8, width=40)
-        lst.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+        lst.grid(row=0, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
         top.grid_columnconfigure(0, weight=1)
         top.grid_rowconfigure(0, weight=1)
 
         def refresh_list():
             lst.delete(0, tk.END)
-            for name in params:
-                lst.insert(tk.END, name)
+            for p in params:
+                lst.insert(tk.END, f"{p.name} ({p.type})")
 
         name_var = tk.StringVar()
+        type_var = tk.StringVar(value="text")
 
-        def on_add():
+        def on_select(event=None):
+            selection = lst.curselection()
+            if not selection:
+                return
+            p = params[selection[0]]
+            name_var.set(p.name)
+            type_var.set(p.type)
+
+        def on_add_or_update():
             name = name_var.get().strip()
+            param_type = type_var.get().strip().lower() or "text"
+            if param_type not in {"text", "number"}:
+                param_type = "text"
             if not name:
                 messagebox.showerror("Error", "Parameter name cannot be empty.")
                 return
-            if name in params:
-                messagebox.showerror("Error", "Parameter names must be unique.")
-                return
-            params.append(name)
-            name_var.set("")
+
+            selection = lst.curselection()
+            existing_names = {p.name for p in params}
+            if selection:
+                idx = selection[0]
+                if name != params[idx].name and name in existing_names:
+                    messagebox.showerror("Error", "Parameter names must be unique.")
+                    return
+                params[idx] = ManualParam(name=name, type=param_type)
+            else:
+                if name in existing_names:
+                    messagebox.showerror("Error", "Parameter names must be unique.")
+                    return
+                params.append(ManualParam(name=name, type=param_type))
+
             refresh_list()
+            name_var.set("")
+            type_var.set("text")
 
         def on_remove():
             selection = lst.curselection()
@@ -1093,17 +1119,32 @@ class ShotManagerGUI:
             idx = selection[0]
             params.pop(idx)
             refresh_list()
+            name_var.set("")
+            type_var.set("text")
 
-        ttk.Label(top, text="New parameter name:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(top, text="Name:").grid(row=1, column=0, sticky="e", padx=5, pady=2)
         ttk.Entry(top, textvariable=name_var, width=25).grid(row=1, column=1, sticky="w", padx=5, pady=2)
-        ttk.Button(top, text="Add", command=on_add).grid(row=1, column=2, sticky="w", padx=5, pady=2)
-        ttk.Button(top, text="Remove selected", command=on_remove).grid(row=2, column=0, columnspan=3, sticky="w", padx=5, pady=5)
+        ttk.Label(top, text="Type:").grid(row=1, column=2, sticky="e", padx=5, pady=2)
+        ttk.Combobox(top, values=["text", "number"], textvariable=type_var, state="readonly", width=10).grid(
+            row=1, column=3, sticky="w", padx=5, pady=2
+        )
+        ttk.Button(top, text="Add / Update", command=on_add_or_update).grid(row=2, column=1, sticky="w", padx=5, pady=5)
+        ttk.Button(top, text="Remove selected", command=on_remove).grid(row=2, column=2, columnspan=2, sticky="w", padx=5, pady=5)
 
         def on_ok():
-            clean_params = [p.strip() for p in params if p.strip()]
-            if len(clean_params) != len(set(clean_params)):
-                messagebox.showerror("Error", "Parameter names must be unique and non-empty.")
-                return
+            clean_params: list[ManualParam] = []
+            seen: set[str] = set()
+            for p in params:
+                name = p.name.strip()
+                if not name:
+                    continue
+                if name in seen:
+                    messagebox.showerror("Error", "Parameter names must be unique and non-empty.")
+                    return
+                seen.add(name)
+                ptype = p.type if p.type in ["text", "number"] else "text"
+                clean_params.append(ManualParam(name=name, type=ptype))
+
             self.config.manual_params = clean_params
             self._rebuild_manual_param_fields()
             self._rebuild_manual_confirm_display()
@@ -1112,8 +1153,10 @@ class ShotManagerGUI:
             self._after_config_changed()
             top.destroy()
 
-        ttk.Button(top, text="OK", command=on_ok).grid(row=3, column=1, sticky="e", padx=5, pady=5)
-        ttk.Button(top, text="Cancel", command=top.destroy).grid(row=3, column=2, sticky="w", padx=5, pady=5)
+        lst.bind("<<ListboxSelect>>", on_select)
+
+        ttk.Button(top, text="OK", command=on_ok).grid(row=3, column=2, sticky="e", padx=5, pady=5)
+        ttk.Button(top, text="Cancel", command=top.destroy).grid(row=3, column=3, sticky="w", padx=5, pady=5)
 
         refresh_list()
         top.grab_set()
@@ -1131,11 +1174,17 @@ class ShotManagerGUI:
             )
             return
 
-        for idx, name in enumerate(self.config.manual_params):
-            ttk.Label(self.frm_manual_params_fields, text=f"{name}:").grid(row=idx, column=0, sticky="w", padx=5, pady=2)
+        for idx, param in enumerate(self.config.manual_params):
+            name = param.name
+            label_txt = f"{name} ({param.type})" if param.type else f"{name}"
+            ttk.Label(self.frm_manual_params_fields, text=f"{label_txt}:").grid(
+                row=idx, column=0, sticky="w", padx=5, pady=2
+            )
             var = tk.StringVar()
             self.manual_param_vars[name] = var
             entry = ttk.Entry(self.frm_manual_params_fields, textvariable=var, width=50)
+            if param.type == "number":
+                entry.configure(validate="key", validatecommand=(self._number_validator, "%P"))
             entry.grid(
                 row=idx, column=1, sticky="we", padx=5, pady=2
             )
@@ -1154,8 +1203,10 @@ class ShotManagerGUI:
             self.manual_confirm_values_frame.columnconfigure(0, weight=1)
             return
 
-        for idx, name in enumerate(self.config.manual_params):
-            ttk.Label(self.manual_confirm_values_frame, text=f"{name} :").grid(
+        for idx, param in enumerate(self.config.manual_params):
+            name = param.name
+            label_txt = f"{name} ({param.type})" if param.type else f"{name}"
+            ttk.Label(self.manual_confirm_values_frame, text=f"{label_txt} :").grid(
                 row=idx, column=0, sticky="w", padx=5, pady=2
             )
             lbl = ttk.Label(self.manual_confirm_values_frame, text="-")
@@ -1189,6 +1240,12 @@ class ShotManagerGUI:
             lbl.configure(text=value if value else "-")
         self._update_manual_target_label()
 
+    def _validate_number_entry(self, proposed: str) -> bool:
+        if proposed == "":
+            return True
+        pattern = r"^[+-]?((\d+(\.\d*)?)|(\.\d+))?([eE][+-]?\d*)?$"
+        return bool(re.fullmatch(pattern, proposed))
+
     def _reset_manual_state(self):
         self.manual_target_date = None
         self.manual_target_index = None
@@ -1210,7 +1267,7 @@ class ShotManagerGUI:
         values: dict[str, str] = {}
         for name, entry in self.manual_entries.items():
             raw = entry.get().strip()
-            values[name] = raw if raw != "" else "-"
+            values[name] = raw
 
         self.manual_confirmed_values = values
         self._update_manual_confirm_display()
@@ -1262,23 +1319,14 @@ class ShotManagerGUI:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        param_names = list(self.config.manual_params)
-        fieldnames = ["date", "shot", "trigger_time"] + param_names
-
-        row = {
-            "date": self.manual_target_date,
-            "shot": f"{self.manual_target_index:03d}",
-            "trigger_time": trigger_time or "",
-        }
-        for name in param_names:
-            row[name] = self.manual_confirmed_values.get(name, "-")
-
-        file_exists = output_path.exists()
-        with output_path.open("a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(row)
+        write_manual_params_row(
+            output_path,
+            self.config.manual_params,
+            self.manual_target_date,
+            self.manual_target_index,
+            trigger_time,
+            self.manual_confirmed_values,
+        )
 
         self.manual_last_written_key = key
         self._append_log(

@@ -13,6 +13,33 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 
+@dataclass
+class ManualParam:
+    name: str
+    type: str = "text"
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "type": self.type or "text"}
+
+    @classmethod
+    def from_raw(cls, raw) -> "ManualParam | None":
+        if isinstance(raw, cls):
+            return raw
+        if isinstance(raw, dict):
+            name = str(raw.get("name", "")).strip()
+            if not name:
+                return None
+            param_type = str(raw.get("type", "text")).strip().lower() or "text"
+            if param_type not in {"text", "number"}:
+                param_type = "text"
+            return cls(name=name, type=param_type)
+        name = str(raw).strip()
+        if not name:
+            return None
+        return cls(name=name, type="text")
+
+
+
 def _normalize_extension(ext: str) -> str:
     ext = ext.strip().lower()
     if ext and not ext.startswith("."):
@@ -143,7 +170,7 @@ class ShotLogConfig:
     motor_history_csv: str = ""
     motor_positions_output: str = "motor_positions_by_shot.csv"
     use_default_motor_positions_path: bool = False
-    manual_params: List[str] = field(default_factory=list)
+    manual_params: List[ManualParam] = field(default_factory=list)
     manual_params_csv_path: str | None = "manual_params_by_shot.csv"
     use_default_manual_params_path: bool = False
     manual_date_override: str | None = None
@@ -171,7 +198,7 @@ class ShotLogConfig:
             "motor_history_csv": self.motor_history_csv,
             "motor_positions_output": self.motor_positions_output,
             "use_default_motor_positions_path": self.use_default_motor_positions_path,
-            "manual_params": list(self.manual_params),
+            "manual_params": [p.to_dict() for p in self.manual_params],
             "manual_params_csv_path": self.manual_params_csv_path,
             "use_default_manual_params_path": self.use_default_manual_params_path,
             "manual_date_override": self.manual_date_override,
@@ -203,6 +230,13 @@ class ShotLogConfig:
             or "rename_log"
         )
 
+        raw_manual_params = data.get("manual_params", [])
+        manual_params: List[ManualParam] = []
+        for item in raw_manual_params:
+            param = ManualParam.from_raw(item)
+            if param:
+                manual_params.append(param)
+
         cfg = cls(
             project_root=data.get("project_root"),
             raw_root_suffix=raw_root_suffix,
@@ -221,7 +255,7 @@ class ShotLogConfig:
             use_default_motor_positions_path=bool(
                 data.get("use_default_motor_positions_path", False)
             ),
-            manual_params=list(data.get("manual_params", [])),
+            manual_params=manual_params,
             manual_params_csv_path=data.get("manual_params_csv_path", "manual_params_by_shot.csv"),
             use_default_manual_params_path=bool(
                 data.get("use_default_manual_params_path", False)
@@ -235,6 +269,10 @@ class ShotLogConfig:
 
     def clone(self) -> "ShotLogConfig":
         return ShotLogConfig.from_dict(self.to_dict())
+
+    @property
+    def manual_param_names(self) -> List[str]:
+        return [p.name for p in self.manual_params]
 
     @property
     def trigger_folders(self) -> List[str]:
