@@ -20,11 +20,13 @@
   "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
   "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/motors/istoric_2025-12-02.csv",
   "motor_positions_output": "motor_positions_by_shot.csv",
+  "use_default_motor_positions_path": false,
   "manual_params": [
     "Laser energy",
     "jet 2"
   ],
   "manual_params_csv_path": "manual_params_by_shot.csv",
+  "use_default_manual_params_path": false,
   "manual_date_override": null,
   "folders": [
     {
