@@ -71,6 +71,55 @@
           "ext": ".tiff"
         }
       ]
+    },
+    {
+      "name": "LanexGamma",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "DarkShadow",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "TopView",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "SideView",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "FROG",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        },
+        {
+          "keyword": "2025",
+          "ext": ".ter"
+        }
+      ]
     }
   ]
 }
