@@ -41,8 +41,8 @@ RAW_FOLDER_NAME = "ELI50069_RAW_DATA"
 MOTOR_FOLDER_NAME = "motors"
 
 # Date logique des shots (celle qui sera utilisée pour les sous-dossiers de date)
-# Tu peux mettre datetime.today().date() si tu veux la date du jour.
-SHOT_DATE = datetime(2025, 12, 2).date()
+# Calculée une seule fois au lancement pour conserver la même valeur durant la session
+SHOT_DATE = datetime.today().date()
 
 # Délais min / max autour du trigger (en secondes) pour les fichiers de chaque caméra
 # Exemple : entre -0.5s et +0.5s autour du trigger de shot.

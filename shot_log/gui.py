@@ -10,7 +10,13 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from .config import DEFAULT_CONFIG, FolderConfig, FolderFileSpec, ShotLogConfig
+from .config import (
+    DEFAULT_CONFIG,
+    FolderConfig,
+    FolderFileSpec,
+    ShotLogConfig,
+    _parse_extensions_field,
+)
 from .manager import ShotManager
 from .manual_params import build_empty_manual_values
 
@@ -822,27 +828,32 @@ class ShotManagerGUI:
         ttk.Checkbutton(top, text="Expected", variable=expected_var).grid(row=1, column=0, sticky="w", padx=5, pady=2)
         ttk.Checkbutton(top, text="Trigger", variable=trigger_var).grid(row=1, column=1, sticky="w", padx=5, pady=2)
 
-        ttk.Label(top, text="File definitions (keyword + extension)").grid(row=2, column=0, columnspan=2, sticky="w", padx=5)
-        spec_columns = ("keyword", "extension")
+        ttk.Label(top, text="File definitions (keyword + extensions)").grid(row=2, column=0, columnspan=2, sticky="w", padx=5)
+        spec_columns = ("keyword", "extensions")
         spec_tree = ttk.Treeview(top, columns=spec_columns, show="headings", height=5)
         spec_tree.heading("keyword", text="Keyword")
-        spec_tree.heading("extension", text="Extension")
+        spec_tree.heading("extensions", text="Extensions")
         spec_tree.column("keyword", width=160)
-        spec_tree.column("extension", width=120)
+        spec_tree.column("extensions", width=180)
         spec_tree.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
-        specs = [FolderFileSpec(keyword=s.keyword, extension=s.extension) for s in (folder.file_specs if folder else [FolderFileSpec(extension=".tif")])]
+        specs = [
+            FolderFileSpec(keyword=s.keyword, extensions=list(s.extensions))
+            for s in (folder.file_specs if folder else [FolderFileSpec(extensions=[".tif"])])
+        ]
 
         def refresh_specs():
             spec_tree.delete(*spec_tree.get_children())
             for idx, spec in enumerate(specs):
-                spec_tree.insert("", "end", iid=str(idx), values=(spec.keyword, spec.extension))
+                ext_desc = ", ".join(spec.normalized_extensions) if spec.normalized_extensions else "(any)"
+                spec_tree.insert("", "end", iid=str(idx), values=(spec.keyword, ext_desc))
 
         kw_var = tk.StringVar()
         ext_var = tk.StringVar()
 
         def add_spec():
-            specs.append(FolderFileSpec(keyword=kw_var.get().strip(), extension=ext_var.get().strip()))
+            extensions = _parse_extensions_field(ext_var.get())
+            specs.append(FolderFileSpec(keyword=kw_var.get().strip(), extensions=extensions))
             kw_var.set("")
             ext_var.set("")
             refresh_specs()
@@ -858,8 +869,8 @@ class ShotManagerGUI:
 
         ttk.Label(top, text="Keyword:").grid(row=4, column=0, sticky="w", padx=5, pady=2)
         ttk.Entry(top, textvariable=kw_var, width=20).grid(row=4, column=1, sticky="w", padx=5, pady=2)
-        ttk.Label(top, text="Extension:").grid(row=5, column=0, sticky="w", padx=5, pady=2)
-        ttk.Entry(top, textvariable=ext_var, width=20).grid(row=5, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(top, text="Extensions (comma-separated, empty = any):").grid(row=5, column=0, sticky="w", padx=5, pady=2)
+        ttk.Entry(top, textvariable=ext_var, width=30).grid(row=5, column=1, sticky="w", padx=5, pady=2)
 
         ttk.Button(top, text="Add file spec", command=add_spec).grid(row=6, column=0, sticky="w", padx=5, pady=2)
         ttk.Button(top, text="Remove file spec", command=remove_spec).grid(row=6, column=1, sticky="w", padx=5, pady=2)
@@ -884,7 +895,7 @@ class ShotManagerGUI:
                 name=name,
                 expected=expected_var.get(),
                 trigger=trigger_var.get(),
-                file_specs=[FolderFileSpec(keyword=s.keyword, extension=s.extension) for s in specs],
+                file_specs=[FolderFileSpec(keyword=s.keyword, extensions=list(s.extensions)) for s in specs],
             )
             top.destroy()
 
