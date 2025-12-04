@@ -16,7 +16,7 @@ from watchdog.observers.polling import PollingObserver
 
 from shot_log_reader import LogShotAnalyzer
 
-from .config import ShotLogConfig
+from .config import ManualParam, ShotLogConfig
 from .logging_utils import create_logger
 from .motors import MotorStateManager, parse_initial_positions, parse_motor_history
 from .utils import ensure_dir, extract_shot_index_from_name, format_dt_for_name
@@ -115,7 +115,11 @@ class ShotManager:
         self.motor_state_manager: MotorStateManager | None = None
         self._motor_sources_mtime: dict[str, float] | None = None
         self._refresh_motor_paths()
-        self.manual_params = list(self.config.manual_params)
+        self.manual_params = []
+        for p in self.config.manual_params:
+            param = ManualParam.from_raw(p)
+            if param:
+                self.manual_params.append(param)
         self._refresh_manual_params_path()
         raw_root_exists = self.raw_root.exists()
         ensure_dir(self.raw_root)
@@ -765,7 +769,11 @@ class ShotManager:
             self.root_path = self.project_root
             self._apply_path_config()
             self._refresh_motor_paths()
-            self.manual_params = list(self.config.manual_params)
+            self.manual_params = []
+            for p in self.config.manual_params:
+                param = ManualParam.from_raw(p)
+                if param:
+                    self.manual_params.append(param)
             self._refresh_manual_params_path()
             ensured_expected = self._ensure_expected_cameras()
 
