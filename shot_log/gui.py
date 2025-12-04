@@ -57,6 +57,11 @@ class ShotManagerGUI:
         self.var_use_default_motor_output = tk.BooleanVar(
             value=self.config.use_default_motor_positions_path
         )
+
+        self._default_manual_path: Path | None = None
+        self._default_manual_clean_root: Path | None = None
+        self._default_motor_path: Path | None = None
+        self._default_motor_clean_root: Path | None = None
         self.ent_manual_params_csv: ttk.Entry | None = None
         self.btn_manual_params_browse: ttk.Button | None = None
         self.ent_motor_output: ttk.Entry | None = None
@@ -547,13 +552,46 @@ class ShotManagerGUI:
         clean_root = self._compute_clean_root()
         if not clean_root:
             return None
-        return clean_root / f"shot_manual_params_{self._get_effective_date_str()}.csv"
+        if self._default_manual_clean_root != clean_root:
+            self._reset_default_manual_cache()
+            self._default_manual_clean_root = clean_root
+        if self._default_manual_path is None:
+            self._default_manual_path = self._build_timestamped_default_path(
+                clean_root, "manual_parameters", "shot_manual_params"
+            )
+        return self._default_manual_path
 
     def _get_default_motor_positions_path(self) -> Path | None:
         clean_root = self._compute_clean_root()
         if not clean_root:
             return None
-        return clean_root / f"shot_motor_positions_{self._get_effective_date_str()}.csv"
+        if self._default_motor_clean_root != clean_root:
+            self._reset_default_motor_cache()
+            self._default_motor_clean_root = clean_root
+        if self._default_motor_path is None:
+            self._default_motor_path = self._build_timestamped_default_path(
+                clean_root, "motors_parameters", "shot_motor_positions"
+            )
+        return self._default_motor_path
+
+    def _build_timestamped_default_path(self, clean_root: Path, subfolder: str, prefix: str) -> Path:
+        now = datetime.now()
+        stamp = now.strftime("%Y%m%d_%H%M%S")
+        target_dir = clean_root / subfolder
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir / f"{prefix}_{stamp}.csv"
+
+    def _reset_default_manual_cache(self):
+        self._default_manual_path = None
+        self._default_manual_clean_root = None
+
+    def _reset_default_motor_cache(self):
+        self._default_motor_path = None
+        self._default_motor_clean_root = None
+
+    def _reset_default_path_cache(self):
+        self._reset_default_manual_cache()
+        self._reset_default_motor_cache()
 
     def _normalize_csv_path_str(self, raw: str | None) -> str | None:
         if not raw:
@@ -590,10 +628,12 @@ class ShotManagerGUI:
                 self.btn_motor_output_browse.state(["!disabled"])
 
     def _on_toggle_default_manual_params(self):
+        self._reset_default_manual_cache()
         self._apply_default_paths()
         self._after_config_changed()
 
     def _on_toggle_default_motor_output(self):
+        self._reset_default_motor_cache()
         self._apply_default_paths()
         self._after_config_changed()
 
@@ -1436,6 +1476,7 @@ class ShotManagerGUI:
         self.lbl_timing.configure(
             text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
         )
+        self._reset_default_path_cache()
         self._apply_default_paths()
         self._update_path_labels()
 
