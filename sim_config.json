@@ -6,8 +6,7 @@
   "raw_subfolder_name": "ELI50069_RAW_DATA",
   "motor_subfolder_name": "motors",
   "initial_csv_path": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
-  "date": "2025-12-02",
-  "max_delay_sec": 5.0,
+  "max_delay_sec": 3.0,
   "cameras": [
     {
       "name": "Lanex1",
@@ -82,15 +81,6 @@
       ]
     },
     {
-      "name": "DarkShadow",
-      "files": [
-        {
-          "keyword": "2025",
-          "ext": ".tiff"
-        }
-      ]
-    },
-    {
       "name": "TopView",
       "files": [
         {
@@ -101,6 +91,15 @@
     },
     {
       "name": "SideView",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "DarkShadow",
       "files": [
         {
           "keyword": "2025",
