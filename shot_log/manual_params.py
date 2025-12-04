@@ -20,6 +20,7 @@ def write_manual_params_row(
     trigger_time_str: str | None,
     values: dict[str, str],
 ):
+    output_path = output_path.with_suffix(".csv")
     ensure_dir(output_path.parent)
     fieldnames = ["date", "shot", "trigger_time"] + [p for p in manual_params]
 

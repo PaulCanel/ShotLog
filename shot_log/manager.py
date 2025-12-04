@@ -103,6 +103,9 @@ class ShotManager:
         self.root_path = self.project_root
         self.gui_queue = gui_queue
 
+        self.manual_date_str: str | None = manual_date_str or self.config.manual_date_override
+        self.last_seen_date_str: str | None = None
+
         self._apply_path_config()
         self.motor_state_manager: MotorStateManager | None = None
         self._motor_sources_mtime: dict[str, float] | None = None
@@ -119,9 +122,7 @@ class ShotManager:
         self.worker_thread = None
         self.observer = None
         self.lock = threading.Lock()
-        self.manual_date_str: str | None = manual_date_str
-        self.last_seen_date_str: str | None = None
-
+        
         # Shots
         self.open_shots = []  # list of shot dicts
         self.last_shot_index_by_date = {}  # { "YYYYMMDD": last_index }
@@ -181,14 +182,24 @@ class ShotManager:
     def _refresh_motor_paths(self):
         self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
         self.motor_history_path = self._resolve_path(self.config.motor_history_csv)
-        self.motor_positions_output = self._resolve_path(
-            self.config.motor_positions_output, default="motor_positions_by_shot.csv"
-        )
+        if self.config.use_default_motor_positions_path:
+            date_str = self._get_active_date_str()
+            self.motor_positions_output = (self.clean_root / f"shot_motor_positions_{date_str}.csv").resolve()
+        else:
+            path = self._resolve_path(
+                self.config.motor_positions_output, default="motor_positions_by_shot.csv"
+            )
+            self.motor_positions_output = path.with_suffix(".csv") if path else None
 
     def _refresh_manual_params_path(self):
-        self.manual_params_csv_path = self._resolve_path(
-            self.config.manual_params_csv_path, default="manual_params_by_shot.csv"
-        )
+        if self.config.use_default_manual_params_path:
+            date_str = self._get_active_date_str()
+            self.manual_params_csv_path = (self.clean_root / f"shot_manual_params_{date_str}.csv").resolve()
+        else:
+            path = self._resolve_path(
+                self.config.manual_params_csv_path, default="manual_params_by_shot.csv"
+            )
+            self.manual_params_csv_path = path.with_suffix(".csv") if path else None
 
     def _ensure_expected_cameras(self, log_prefix: str | None = None) -> list[str]:
         expected = self.config.expected_folders
@@ -361,6 +372,8 @@ class ShotManager:
         return self.motor_state_manager
 
     def _write_motor_positions_for_shot(self, shot: dict):
+        if self.config.use_default_motor_positions_path:
+            self._refresh_motor_paths()
         manager = self._load_motor_state_manager()
         if manager is None:
             return
@@ -449,6 +462,8 @@ class ShotManager:
         return [shots_by_key[k] for k in sorted(shots_by_key.keys())]
 
     def recompute_all_motor_positions(self):
+        if self.config.use_default_motor_positions_path:
+            self._refresh_motor_paths()
         self._log("INFO", "Starting full recompute of motor positions for all shots...")
         manager = self._load_motor_state_manager(force_reload=True)
         if manager is None:
@@ -711,6 +726,7 @@ class ShotManager:
             previous_raw_root = getattr(self, "raw_root", None)
             previous_log_dir = getattr(self, "log_dir", None)
             self.config = new_config.clone()
+            self.manual_date_str = self.config.manual_date_override
             self.project_root = Path(self.config.project_root or self.root_path).resolve()
             self.root_path = self.project_root
             self._apply_path_config()
@@ -758,6 +774,8 @@ class ShotManager:
         """
         with self.lock:
             self.manual_date_str = date_str
+            self._refresh_manual_params_path()
+            self._refresh_motor_paths()
         if date_str is None:
             self._log("INFO", "Manual date cleared, using system today().")
         else:

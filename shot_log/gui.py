@@ -51,11 +51,22 @@ class ShotManagerGUI:
         self.manual_confirmed_values: dict[str, str] = {}
         self.manual_enabled: bool = False
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
+        self.var_use_default_manual_params = tk.BooleanVar(
+            value=self.config.use_default_manual_params_path
+        )
+        self.var_use_default_motor_output = tk.BooleanVar(
+            value=self.config.use_default_motor_positions_path
+        )
+        self.ent_manual_params_csv: ttk.Entry | None = None
+        self.btn_manual_params_browse: ttk.Button | None = None
+        self.ent_motor_output: ttk.Entry | None = None
+        self.btn_motor_output_browse: ttk.Button | None = None
 
         self._build_gui()
         self._update_date_mode_label()
         self._update_path_labels()
         self._reset_manual_state()
+        self._apply_default_paths()
 
         self.root.after(200, self._poll_log_queue)
         self.root.after(500, self._update_status_labels)
@@ -199,12 +210,20 @@ class ShotManagerGUI:
             row=0, column=0, padx=5, pady=5, sticky="w"
         )
         ttk.Label(frm_manual_cfg, text="Manual params CSV:").grid(row=0, column=1, sticky="e")
-        ttk.Entry(frm_manual_cfg, textvariable=self.var_manual_params_csv, width=50).grid(
-            row=0, column=2, sticky="we", padx=5
+        self.ent_manual_params_csv = ttk.Entry(
+            frm_manual_cfg, textvariable=self.var_manual_params_csv, width=50
         )
-        ttk.Button(frm_manual_cfg, text="Browse...", command=self._choose_manual_params_csv).grid(
-            row=0, column=3, padx=5, pady=5
+        self.ent_manual_params_csv.grid(row=0, column=2, sticky="we", padx=5)
+        self.btn_manual_params_browse = ttk.Button(
+            frm_manual_cfg, text="Browse...", command=self._choose_manual_params_csv
         )
+        self.btn_manual_params_browse.grid(row=0, column=3, padx=5, pady=5)
+        ttk.Checkbutton(
+            frm_manual_cfg,
+            text="Use default manual params path",
+            variable=self.var_use_default_manual_params,
+            command=self._on_toggle_default_manual_params,
+        ).grid(row=0, column=4, padx=5, sticky="w")
         frm_manual_cfg.columnconfigure(2, weight=1)
 
         frm_manual_params = ttk.LabelFrame(self.content_frame, text="Manual parameters (per shot)")
@@ -245,8 +264,20 @@ class ShotManagerGUI:
 
         ttk.Label(frm_motor, text="Positions by shot CSV:").grid(row=2, column=0, sticky="w")
         self.var_motor_output = tk.StringVar(value=self.config.motor_positions_output)
-        ttk.Entry(frm_motor, textvariable=self.var_motor_output, width=50).grid(row=2, column=1, sticky="we", padx=5)
-        ttk.Button(frm_motor, text="Browse...", command=self._choose_motor_output).grid(row=2, column=2, padx=5)
+        self.ent_motor_output = ttk.Entry(
+            frm_motor, textvariable=self.var_motor_output, width=50
+        )
+        self.ent_motor_output.grid(row=2, column=1, sticky="we", padx=5)
+        self.btn_motor_output_browse = ttk.Button(
+            frm_motor, text="Browse...", command=self._choose_motor_output
+        )
+        self.btn_motor_output_browse.grid(row=2, column=2, padx=5)
+        ttk.Checkbutton(
+            frm_motor,
+            text="Use default motor positions path",
+            variable=self.var_use_default_motor_output,
+            command=self._on_toggle_default_motor_output,
+        ).grid(row=2, column=3, padx=5, sticky="w")
 
         ttk.Button(frm_motor, text="Recompute all motor positions", command=self._recompute_motor_positions).grid(
             row=3, column=0, columnspan=3, sticky="w", padx=5, pady=5
@@ -448,6 +479,8 @@ class ShotManagerGUI:
                 self._update_date_mode_label()
                 if self.manager:
                     self.manager.set_manual_date(None)
+                self._apply_default_paths()
+                self._after_config_changed()
                 top.destroy()
                 return
 
@@ -463,6 +496,8 @@ class ShotManagerGUI:
             self._update_date_mode_label()
             if self.manager:
                 self.manager.set_manual_date(date_str)
+            self._apply_default_paths()
+            self._after_config_changed()
             top.destroy()
 
         ttk.Button(top, text="OK", command=on_ok).grid(row=2, column=0, padx=5, pady=5, sticky="e")
@@ -492,7 +527,75 @@ class ShotManagerGUI:
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if path:
-            self.var_motor_output.set(path)
+            self.var_motor_output.set(str(Path(path).with_suffix(".csv")))
+
+    def _get_effective_date_str(self) -> str:
+        if self.var_date_mode.get() == "manual":
+            date_str = self.var_manual_date.get().strip()
+            if date_str:
+                return date_str
+        return datetime.today().strftime("%Y%m%d")
+
+    def _compute_clean_root(self) -> Path | None:
+        base_root = self.var_root.get().strip()
+        if not base_root:
+            return None
+        clean_name = self.var_clean_folder.get().strip() or self.config.clean_root_suffix
+        return Path(base_root) / clean_name
+
+    def _get_default_manual_params_path(self) -> Path | None:
+        clean_root = self._compute_clean_root()
+        if not clean_root:
+            return None
+        return clean_root / f"shot_manual_params_{self._get_effective_date_str()}.csv"
+
+    def _get_default_motor_positions_path(self) -> Path | None:
+        clean_root = self._compute_clean_root()
+        if not clean_root:
+            return None
+        return clean_root / f"shot_motor_positions_{self._get_effective_date_str()}.csv"
+
+    def _normalize_csv_path_str(self, raw: str | None) -> str | None:
+        if not raw:
+            return None
+        return str(Path(raw).with_suffix(".csv"))
+
+    def _apply_default_paths(self):
+        if self.var_use_default_manual_params.get():
+            default_manual = self._get_default_manual_params_path()
+            if default_manual:
+                self.var_manual_params_csv.set(str(default_manual.with_suffix(".csv")))
+            if self.ent_manual_params_csv:
+                self.ent_manual_params_csv.state(["disabled"])
+            if self.btn_manual_params_browse:
+                self.btn_manual_params_browse.state(["disabled"])
+        else:
+            if self.ent_manual_params_csv:
+                self.ent_manual_params_csv.state(["!disabled"])
+            if self.btn_manual_params_browse:
+                self.btn_manual_params_browse.state(["!disabled"])
+
+        if self.var_use_default_motor_output.get():
+            default_motor = self._get_default_motor_positions_path()
+            if default_motor:
+                self.var_motor_output.set(str(default_motor.with_suffix(".csv")))
+            if self.ent_motor_output:
+                self.ent_motor_output.state(["disabled"])
+            if self.btn_motor_output_browse:
+                self.btn_motor_output_browse.state(["disabled"])
+        else:
+            if self.ent_motor_output:
+                self.ent_motor_output.state(["!disabled"])
+            if self.btn_motor_output_browse:
+                self.btn_motor_output_browse.state(["!disabled"])
+
+    def _on_toggle_default_manual_params(self):
+        self._apply_default_paths()
+        self._after_config_changed()
+
+    def _on_toggle_default_motor_output(self):
+        self._apply_default_paths()
+        self._after_config_changed()
 
     def _ensure_manager(self):
         """
@@ -557,9 +660,13 @@ class ShotManagerGUI:
             cfg.manual_date_override = None
         cfg.motor_initial_csv = self.var_motor_initial.get()
         cfg.motor_history_csv = self.var_motor_history.get()
-        cfg.motor_positions_output = self.var_motor_output.get()
+        cfg.motor_positions_output = self._normalize_csv_path_str(self.var_motor_output.get()) or ""
+        cfg.use_default_motor_positions_path = self.var_use_default_motor_output.get()
         cfg.manual_params = list(self.config.manual_params)
-        cfg.manual_params_csv_path = self.var_manual_params_csv.get()
+        cfg.manual_params_csv_path = self._normalize_csv_path_str(
+            self.var_manual_params_csv.get()
+        )
+        cfg.use_default_manual_params_path = self.var_use_default_manual_params.get()
         if not cfg.expected_folders and cfg.folders:
             for folder in cfg.folders.values():
                 folder.expected = True
@@ -656,6 +763,7 @@ class ShotManagerGUI:
         self.config.clean_root_suffix = clean_name
         self.config.rename_log_folder_suffix = log_name
 
+        self._apply_default_paths()
         runtime_config = self._build_runtime_config()
         self.config = runtime_config.clone()
         if self.manager:
@@ -1075,12 +1183,16 @@ class ShotManagerGUI:
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if path:
-            self.var_manual_params_csv.set(path)
+            self.var_manual_params_csv.set(str(Path(path).with_suffix(".csv")))
             self._after_config_changed()
 
     def _get_manual_params_output_path(self) -> Path | None:
         if self.manager and getattr(self.manager, "manual_params_csv_path", None):
-            return self.manager.manual_params_csv_path
+            return Path(self.manager.manual_params_csv_path).with_suffix(".csv")
+
+        if self.var_use_default_manual_params.get():
+            default_path = self._get_default_manual_params_path()
+            return default_path.with_suffix(".csv") if default_path else None
 
         cfg_path = self.config.manual_params_csv_path
         if cfg_path:
@@ -1093,7 +1205,7 @@ class ShotManagerGUI:
         if not p.is_absolute():
             p = root / p
 
-        return p
+        return p.with_suffix(".csv")
 
     def _write_manual_line_for_target(self, trigger_time: str | None):
         if self.manual_target_date is None or self.manual_target_index is None:
@@ -1214,7 +1326,14 @@ class ShotManagerGUI:
         self._reset_manual_state()
 
     def _after_config_changed(self):
-        self.config.manual_params_csv_path = self.var_manual_params_csv.get().strip() or None
+        self.config.use_default_manual_params_path = self.var_use_default_manual_params.get()
+        self.config.manual_params_csv_path = self._normalize_csv_path_str(
+            self.var_manual_params_csv.get().strip()
+        )
+        self.config.use_default_motor_positions_path = self.var_use_default_motor_output.get()
+        self.config.motor_positions_output = self._normalize_csv_path_str(
+            self.var_motor_output.get().strip()
+        ) or ""
         self._refresh_folder_labels()
         if self.manager:
             self.manager.update_config(self._build_runtime_config())
@@ -1303,6 +1422,8 @@ class ShotManagerGUI:
         self.var_motor_history.set(self.config.motor_history_csv)
         self.var_motor_output.set(self.config.motor_positions_output)
         self.var_manual_params_csv.set(self.config.manual_params_csv_path or "")
+        self.var_use_default_manual_params.set(self.config.use_default_manual_params_path)
+        self.var_use_default_motor_output.set(self.config.use_default_motor_positions_path)
         if not self.config.expected_folders and self.config.folders:
             for folder in self.config.folders.values():
                 folder.expected = True
@@ -1315,6 +1436,7 @@ class ShotManagerGUI:
         self.lbl_timing.configure(
             text=f"window={self.config.full_window_s} / timeout={self.config.timeout_s}"
         )
+        self._apply_default_paths()
         self._update_path_labels()
 
     # ---------------------------
