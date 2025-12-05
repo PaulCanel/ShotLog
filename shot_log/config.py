@@ -164,7 +164,7 @@ class ShotLogConfig:
     global_trigger_keyword: str = "shot"
     apply_global_keyword_to_all: bool = False
     test_keywords: List[str] = field(default_factory=lambda: ["test", "align"])
-    state_file: str = "eli50069_state.json"
+    state_file: str = "shot_log_state.json"
     check_interval_s: float = 0.5
     motor_initial_csv: str = ""
     motor_history_csv: str = ""
@@ -247,7 +247,7 @@ class ShotLogConfig:
             global_trigger_keyword=data.get("global_trigger_keyword", "shot"),
             apply_global_keyword_to_all=bool(data.get("apply_global_keyword_to_all", False)),
             test_keywords=list(data.get("test_keywords", ["test", "align"])),
-            state_file=data.get("state_file", "eli50069_state.json"),
+            state_file=data.get("state_file", "shot_log_state.json"),
             check_interval_s=float(data.get("check_interval_s", 0.5)),
             motor_initial_csv=data.get("motor_initial_csv", ""),
             motor_history_csv=data.get("motor_history_csv", ""),

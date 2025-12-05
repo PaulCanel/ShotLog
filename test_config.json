@@ -14,7 +14,7 @@
     "test",
     "align"
   ],
-  "state_file": "eli50069_state.json",
+  "state_file": "shot_log_state.json",
   "log_dir": "ELI50069_CLEAN_DATA/shot_logs",
   "check_interval_s": 0.5,
   "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/initial.csv",

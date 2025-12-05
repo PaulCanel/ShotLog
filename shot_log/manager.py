@@ -195,11 +195,19 @@ class ShotManager:
         self.config.project_root = str(base_root)
         self.clean_root = base_root / self.config.clean_root_suffix
         self.log_dir = base_root / self.config.rename_log_folder_suffix
-        self.state_file = base_root / self.config.state_file
+        self.state_file = self._resolve_state_file_path(self.config.state_file)
 
         if previous_clean_root and previous_clean_root != self.clean_root:
             self._reset_manual_default_path()
             self._reset_motor_default_path()
+
+    def _resolve_state_file_path(self, state_file_setting: str | Path | None) -> Path:
+        """Return the absolute path for the state file under CLEAN by default."""
+
+        candidate = Path(state_file_setting) if state_file_setting else Path("shot_log_state.json")
+        if candidate.is_absolute():
+            return candidate
+        return (self.clean_root / candidate).resolve()
 
     def _refresh_motor_paths(self):
         self.motor_initial_path = self._resolve_path(self.config.motor_initial_csv)
@@ -263,14 +271,11 @@ class ShotManager:
 
         Priority order:
         1) manual date override (if set)
-        2) last RAW date observed from actual files
-        3) system date (fallback only if nothing was seen yet)
+        2) system date (fallback)
         """
         manual = getattr(self, "manual_date_str", None)
         if manual:
             return manual
-        if self.last_seen_date_str:
-            return self.last_seen_date_str
         return datetime.now().strftime("%Y%m%d")
 
     def _get_motor_history_fallback_date(self) -> date:
@@ -306,6 +311,7 @@ class ShotManager:
         self._log("INFO", f"RAW root    = {self.raw_root}")
         self._log("INFO", f"CLEAN root  = {self.clean_root}")
         self._log("INFO", f"Log folder  = {self.log_dir}")
+        self._log("INFO", f"State file  = {self.state_file}")
 
     # ---------------------------
     # STATE LOAD / SAVE
@@ -313,11 +319,23 @@ class ShotManager:
 
     def _load_state(self):
         if not self.state_file.exists():
-            self._log("INFO", "No previous state file found, starting fresh.")
-            return
+            legacy_path = self.project_root / "eli50069_state.json"
+            if legacy_path.exists() and legacy_path != self.state_file:
+                self._log(
+                    "INFO",
+                    f"No state at {self.state_file}, loading legacy file from {legacy_path}",
+                )
+                source_path = legacy_path
+            else:
+                self._log(
+                    "INFO", f"No previous state file found at {self.state_file}, starting fresh."
+                )
+                return
+        else:
+            source_path = self.state_file
 
         try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
+            with open(source_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
 
             self.last_shot_index_by_date = state.get("last_shot_index_by_date", {})
@@ -329,20 +347,7 @@ class ShotManager:
                     continue
             self.processed_files = state.get("processed_files", {})
             self.system_status = state.get("system_status", "IDLE")
-            manual_date = state.get("manual_date_str")
-            self.last_seen_date_str = state.get("last_seen_date_str")
-            if manual_date and self.manual_date_str is None:
-                try:
-                    datetime.strptime(manual_date, "%Y%m%d")
-                    self.manual_date_str = manual_date
-                except ValueError:
-                    self.manual_date_str = None
-                    self._log(
-                        "WARNING",
-                        f"Ignored invalid manual date in state file: {manual_date}",
-                    )
-
-            self._log("INFO", f"Loaded state from {self.state_file}")
+            self._log("INFO", f"Loaded state from {source_path}")
         except Exception as e:
             self._log("ERROR", f"Failed to load state file: {e}")
 
@@ -358,6 +363,7 @@ class ShotManager:
             "last_seen_date_str": self.last_seen_date_str,
         }
         try:
+            os.makedirs(self.state_file.parent, exist_ok=True)
             with open(self.state_file, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
