@@ -1402,10 +1402,9 @@ class ShotManagerGUI:
             self._update_manual_confirm_display()
             return
 
-        # A new shot has started acquiring: flush previous target if needed then follow the new one
-        if self.manual_values_pending_for_current_shot:
-            self._write_manual_line_for_key(manual_key, self.manual_target_trigger_time)
-            self.manual_values_pending_for_current_shot = False
+        # A new shot has started acquiring: flush previous target then follow the new one
+        self._write_manual_line_for_key(manual_key, self.manual_target_trigger_time)
+        self.manual_values_pending_for_current_shot = False
 
         self.manual_target_date, self.manual_target_index = current_key
         self.manual_target_trigger_time = current_trigger
@@ -1418,7 +1417,7 @@ class ShotManagerGUI:
 
     def _flush_manual_params_on_stop(self):
         key = self._current_manual_key()
-        if key is not None and self.manual_values_pending_for_current_shot:
+        if key is not None:
             trigger = self.manual_target_trigger_time
 
             if trigger is None and self.manager:
