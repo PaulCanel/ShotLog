@@ -435,6 +435,26 @@ class ShotManager:
         existing_rows: list[dict[str, str]] = []
         existing_header: list[str] | None = None
 
+        def _normalize_trigger_time(raw_time):
+            if raw_time is None:
+                return ""
+            if isinstance(raw_time, datetime):
+                return raw_time.strftime("%H:%M:%S")
+            txt = str(raw_time).strip()
+            if not txt:
+                return ""
+            try:
+                return datetime.fromisoformat(txt).strftime("%H:%M:%S")
+            except Exception:
+                pass
+            if " " in txt:
+                txt = txt.split(" ")[-1]
+            if "." in txt:
+                txt = txt.split(".")[0]
+            if re.match(r"^\d{2}:\d{2}:\d{2}$", txt):
+                return txt
+            return txt
+
         if output_path.exists():
             try:
                 with output_path.open("r", newline="", encoding="utf-8") as f:
@@ -444,6 +464,9 @@ class ShotManager:
             except Exception as exc:
                 self._log("WARNING", f"Could not read existing motor positions file: {exc}")
 
+        for row in existing_rows:
+            row["trigger_time"] = _normalize_trigger_time(row.get("trigger_time"))
+
         if existing_header and len(existing_header) >= 2:
             known_motors = existing_header[2:]
             all_motors = sorted(set(known_motors) | set(desired_motors))
@@ -452,7 +475,10 @@ class ShotManager:
 
         header = header_prefix + all_motors
         positions = manager.get_positions_at(trigger_time)
-        row = {"shot_number": shot.get("shot_index"), "trigger_time": trigger_time.isoformat(sep=" ")}
+        row = {
+            "shot_number": shot.get("shot_index"),
+            "trigger_time": _normalize_trigger_time(trigger_time),
+        }
         for motor in all_motors:
             val = positions.get(motor)
             row[motor] = "" if val is None else val

@@ -29,18 +29,6 @@ def build_empty_manual_values(params: Iterable[ManualParam | str]) -> dict[str, 
     return {name: "" for name in _param_name_list(params)}
 
 
-def _format_date(date_str: str | None) -> str:
-    if not date_str:
-        return ""
-    date_str = str(date_str)
-    if re.match(r"^\d{8}$", date_str):
-        return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-    try:
-        return datetime.fromisoformat(date_str).date().isoformat()
-    except ValueError:
-        return date_str
-
-
 def _format_trigger_time(trigger_time: datetime | str | None) -> str:
     if isinstance(trigger_time, datetime):
         return trigger_time.strftime("%H:%M:%S")
@@ -84,7 +72,6 @@ def _normalize_value(raw: str | None) -> str:
 def write_manual_params_row(
     output_path: Path,
     manual_params: Sequence[ManualParam],
-    date_str: str,
     shot_index: int,
     trigger_time: datetime | str | None,
     values: dict[str, str],
@@ -93,11 +80,10 @@ def write_manual_params_row(
     ensure_dir(output_path.parent)
 
     param_names = [p.name for p in manual_params]
-    headers = ["shot", "date", "trigger_time"] + param_names
+    headers = ["shot", "trigger_time"] + param_names
     row_values: list[str] = []
 
     row_values.append(str(shot_index))
-    row_values.append(_format_date(date_str))
     row_values.append(_format_trigger_time(trigger_time))
 
     for param in manual_params:

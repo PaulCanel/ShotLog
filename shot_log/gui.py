@@ -47,8 +47,9 @@ class ShotManagerGUI:
         self.manual_target_date: str | None = None
         self.manual_target_index: int | None = None
         self.manual_target_trigger_time: str | datetime | None = None
-        self.manual_last_written_key: tuple[str, int] | None = None
         self.manual_confirmed_values: dict[str, str] = {}
+        self.manual_confirmed_by_shot: dict[tuple[str, int], dict[str, str]] = {}
+        self.manual_written_keys: set[tuple[str, int]] = set()
         self.manual_enabled: bool = False
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
         self.var_use_default_manual_params = tk.BooleanVar(
@@ -1220,6 +1221,17 @@ class ShotManagerGUI:
         for var in self.manual_param_vars.values():
             var.set("")
 
+    def _current_manual_key(self) -> tuple[str, int] | None:
+        if self.manual_target_date is None or self.manual_target_index is None:
+            return None
+        return (self.manual_target_date, self.manual_target_index)
+
+    def _get_confirmed_for_key(self, key: tuple[str, int]) -> dict[str, str]:
+        return self.manual_confirmed_by_shot.get(key, self._build_empty_manual_values())
+
+    def _set_confirmed_for_key(self, key: tuple[str, int], values: dict[str, str]):
+        self.manual_confirmed_by_shot[key] = {k: v for k, v in values.items()}
+
     def _build_empty_manual_values(self) -> dict[str, str]:
         return build_empty_manual_values(self.config.manual_params)
 
@@ -1250,8 +1262,9 @@ class ShotManagerGUI:
         self.manual_target_date = None
         self.manual_target_index = None
         self.manual_target_trigger_time = None
-        self.manual_last_written_key = None
         self.manual_confirmed_values = self._build_empty_manual_values()
+        self.manual_confirmed_by_shot = {}
+        self.manual_written_keys = set()
         self.manual_enabled = False
         self._update_manual_confirm_state()
         self._update_manual_target_label()
@@ -1261,7 +1274,8 @@ class ShotManagerGUI:
         if not self.manual_enabled:
             return
 
-        if self.manual_target_date is None or self.manual_target_index is None:
+        key = self._current_manual_key()
+        if key is None:
             return
 
         values: dict[str, str] = {}
@@ -1269,6 +1283,7 @@ class ShotManagerGUI:
             raw = entry.get().strip()
             values[name] = raw
 
+        self._set_confirmed_for_key(key, values)
         self.manual_confirmed_values = values
         self._update_manual_confirm_display()
         self._update_manual_confirm_state()
@@ -1304,12 +1319,8 @@ class ShotManagerGUI:
 
         return p.with_suffix(".csv")
 
-    def _write_manual_line_for_target(self, trigger_time: str | None):
-        if self.manual_target_date is None or self.manual_target_index is None:
-            return
-
-        key = (self.manual_target_date, self.manual_target_index)
-        if self.manual_last_written_key == key:
+    def _write_manual_line_for_key(self, key: tuple[str, int], trigger_time: str | datetime | None):
+        if key in self.manual_written_keys:
             return
 
         output_path = self._get_manual_params_output_path()
@@ -1318,20 +1329,19 @@ class ShotManagerGUI:
             return
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        values = self.manual_confirmed_by_shot.pop(key, self._build_empty_manual_values())
 
         write_manual_params_row(
             output_path,
             self.config.manual_params,
-            self.manual_target_date,
-            self.manual_target_index,
+            key[1],
             trigger_time,
-            self.manual_confirmed_values,
+            values,
         )
 
-        self.manual_last_written_key = key
+        self.manual_written_keys.add(key)
         self._append_log(
-            f"Manual parameters recorded for shot {self.manual_target_index:03d} "
-            f"({self.manual_target_date}) -> {output_path}"
+            f"Manual parameters recorded for shot {key[1]:03d} ({key[0]}) -> {output_path}"
         )
 
     def _handle_manual_params_status(self, status: dict):
@@ -1349,14 +1359,13 @@ class ShotManagerGUI:
             self._reset_manual_state()
             return
 
-        manual_target_key = (self.manual_target_date, self.manual_target_index)
+        manual_target_key = self._current_manual_key()
 
-        if self.manual_target_date is None or self.manual_target_index is None:
+        if manual_target_key is None:
             self.manual_target_date = last_completed_date
             self.manual_target_index = last_completed_idx
             self.manual_target_trigger_time = last_completed_trig
-            self.manual_last_written_key = None
-            self.manual_confirmed_values = self._build_empty_manual_values()
+            self.manual_confirmed_values = self._get_confirmed_for_key(last_key)
             self.manual_enabled = True
             self._update_manual_confirm_state()
             self._update_manual_confirm_display()
@@ -1364,39 +1373,31 @@ class ShotManagerGUI:
 
         if last_key == manual_target_key:
             self.manual_target_trigger_time = last_completed_trig
+            self.manual_confirmed_values = self._get_confirmed_for_key(last_key)
             self.manual_enabled = True
             self._update_manual_confirm_state()
             self._update_manual_confirm_display()
             return
 
-        trigger_str = (
-            self.manual_target_trigger_time.isoformat(sep=" ")
-            if isinstance(self.manual_target_trigger_time, datetime)
-            else self.manual_target_trigger_time
-        )
-        self._write_manual_line_for_target(trigger_str)
+        self._write_manual_line_for_key(manual_target_key, self.manual_target_trigger_time)
 
         self.manual_target_date = last_completed_date
         self.manual_target_index = last_completed_idx
         self.manual_target_trigger_time = last_completed_trig
-        self.manual_confirmed_values = self._build_empty_manual_values()
+        self.manual_confirmed_values = self._get_confirmed_for_key(last_key)
         self.manual_enabled = True
 
         self._update_manual_confirm_state()
         self._update_manual_confirm_display()
 
     def _flush_manual_params_on_stop(self):
-        if self.manual_target_date is None or self.manual_target_index is None:
+        key = self._current_manual_key()
+        if key is None:
             self._reset_manual_state()
             return
 
-        key = (self.manual_target_date, self.manual_target_index)
-        if self.manual_last_written_key != key:
-            trigger = (
-                self.manual_target_trigger_time.isoformat(sep=" ")
-                if isinstance(self.manual_target_trigger_time, datetime)
-                else self.manual_target_trigger_time
-            )
+        if key not in self.manual_written_keys:
+            trigger = self.manual_target_trigger_time
 
             if trigger is None and self.manager:
                 try:
@@ -1409,7 +1410,7 @@ class ShotManagerGUI:
                 except Exception:
                     pass
 
-            self._write_manual_line_for_target(trigger)
+            self._write_manual_line_for_key(key, trigger)
 
         self._reset_manual_state()
 
