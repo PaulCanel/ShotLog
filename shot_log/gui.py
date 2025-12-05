@@ -1,10 +1,11 @@
 from __future__ import annotations
+from datetime import datetime
+from pathlib import Path
 import json
+import logging
 import os
 import queue
 import re
-from datetime import datetime
-from pathlib import Path
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -28,6 +29,8 @@ class ShotManagerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Shot Log")
+
+        self.logger = logging.getLogger(__name__)
 
         self.log_queue = queue.Queue()
         self.manager = None
@@ -1296,6 +1299,11 @@ class ShotManagerGUI:
         self._set_confirmed_for_key(key, values)
         self.manual_confirmed_values = values
         self.manual_values_pending_for_current_shot = True
+        self.logger.info(
+            "[MANUAL] Confirm clicked for target shot=%s: %s",
+            self.manual_target_index,
+            self.manual_confirmed_values,
+        )
         self._update_manual_confirm_display()
         self._update_manual_confirm_state()
 
@@ -1340,7 +1348,21 @@ class ShotManagerGUI:
             return
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        values = self.manual_confirmed_by_shot.pop(key, self._build_empty_manual_values())
+
+        stored_values = self.manual_confirmed_by_shot.pop(key, None)
+        current_key = self._current_manual_key()
+
+        if stored_values is None and current_key == key:
+            stored_values = {k: v for k, v in self.manual_confirmed_values.items()}
+
+        if stored_values is None:
+            stored_values = self._build_empty_manual_values()
+
+        values: dict[str, str] = {}
+        for param in self.config.manual_params:
+            name = param.name
+            raw_val = stored_values.get(name, "")
+            values[name] = "" if raw_val in ("", "-") else raw_val
 
         write_manual_params_row(
             output_path,
@@ -1368,6 +1390,13 @@ class ShotManagerGUI:
         key = (target_date, target_index)
         if key == self.manual_last_written_key:
             return
+
+        self.logger.info(
+            "[MANUAL] Writing CSV line for shot=%s, time=%s, confirmed=%s",
+            self.manual_target_index,
+            trigger_time,
+            self.manual_confirmed_values,
+        )
 
         self._write_manual_line_for_key(key, trigger_time)
 
