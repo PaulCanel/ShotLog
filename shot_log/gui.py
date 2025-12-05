@@ -51,6 +51,9 @@ class ShotManagerGUI:
         self.manual_confirmed_by_shot: dict[tuple[str, int], dict[str, str]] = {}
         self.manual_written_keys: set[tuple[str, int]] = set()
         self.manual_last_written_key: tuple[str, int] | None = None
+        self.manual_last_status_shot: int | None = None
+        self.manual_last_status_date: str | None = None
+        self.manual_last_status_state: str | None = None
         self.manual_values_pending_for_current_shot: bool = False
         self.manual_enabled: bool = False
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
@@ -1241,7 +1244,7 @@ class ShotManagerGUI:
         if self.manual_target_index is None:
             text = "Manual parameters for: no shot yet"
         else:
-            text = f"Manual parameters for: shot {self.manual_target_index:03d}"
+            text = f"Manual parameters for: shot {self.manual_target_index}"
         self.lbl_manual_target.configure(text=text)
 
     def _update_manual_confirm_state(self):
@@ -1264,14 +1267,17 @@ class ShotManagerGUI:
         self.manual_target_date = None
         self.manual_target_index = None
         self.manual_target_trigger_time = None
+        self.manual_last_status_shot = None
+        self.manual_last_status_date = None
+        self.manual_last_status_state = None
+        self.manual_last_written_key = None
         self.manual_confirmed_values = self._build_empty_manual_values()
         self.manual_confirmed_by_shot = {}
         self.manual_written_keys = set()
-        self.manual_last_written_key = None
         self.manual_values_pending_for_current_shot = False
         self.manual_enabled = False
         self._update_manual_confirm_state()
-        self._update_manual_target_label()
+        self.lbl_manual_target.configure(text="Manual parameters for: no shot yet")
         self._update_manual_confirm_display()
 
     def _on_manual_confirm_clicked(self):
@@ -1350,70 +1356,104 @@ class ShotManagerGUI:
             f"Manual parameters recorded for shot {key[1]:03d} ({key[0]}) -> {output_path}"
         )
 
+    def _write_manual_line_for_target(
+        self,
+        target_date: str | None,
+        target_index: int | None,
+        trigger_time: str | datetime | None,
+    ):
+        if target_date is None or target_index is None:
+            return
+
+        key = (target_date, target_index)
+        if key == self.manual_last_written_key:
+            return
+
+        self._write_manual_line_for_key(key, trigger_time)
+
     def _handle_manual_params_status(self, status: dict):
         status = status or {}
-        current_state = status.get("current_shot_state")
-        current_date = status.get("current_shot_date")
-        current_idx = status.get("current_shot_index")
-        current_trigger = status.get("current_shot_trigger_time")
+        shot_state = status.get("shot_state") or status.get("current_shot_state")
+
+        pending_date = status.get("pending_shot_date")
+        pending_index = status.get("pending_shot_index")
+        pending_trigger = status.get("pending_shot_trigger_time")
+
+        if pending_date is None and status.get("current_shot_state") == "acquiring":
+            pending_date = status.get("current_shot_date")
+            pending_index = status.get("current_shot_index")
+            pending_trigger = status.get("current_shot_trigger_time")
 
         last_completed_idx = status.get("last_completed_shot_index")
         last_completed_date = status.get("last_completed_shot_date")
-        last_completed_trig = status.get("last_completed_trigger_time")
+        last_completed_trig = status.get("last_completed_trigger_time") or status.get(
+            "last_shot_trigger_time"
+        )
 
-        current_key = None
-        if current_state == "acquiring" and current_date and current_idx is not None:
-            current_key = (current_date, current_idx)
+        manager_shot_date = None
+        manager_shot_index = None
+        manager_trigger_time = None
 
-        last_completed_key = None
-        if last_completed_date and last_completed_idx is not None:
-            last_completed_key = (last_completed_date, last_completed_idx)
+        if (
+            pending_date is not None
+            and pending_index is not None
+            and shot_state not in (None, "idle")
+        ):
+            manager_shot_date = pending_date
+            manager_shot_index = pending_index
+            manager_trigger_time = pending_trigger
+        else:
+            manager_shot_date = last_completed_date
+            manager_shot_index = last_completed_idx
+            manager_trigger_time = last_completed_trig
 
+        manager_key = (
+            (manager_shot_date, manager_shot_index)
+            if manager_shot_date is not None and manager_shot_index is not None
+            else None
+        )
         manual_key = self._current_manual_key()
 
-        # Update trigger time for the current manual target when we learn it
-        if manual_key is not None:
-            if current_key == manual_key and current_trigger:
-                self.manual_target_trigger_time = current_trigger
-            elif last_completed_key == manual_key and last_completed_trig:
-                self.manual_target_trigger_time = last_completed_trig
+        if manager_key is not None and manager_key != manual_key:
+            self._write_manual_line_for_target(
+                self.manual_target_date,
+                self.manual_target_index,
+                self.manual_target_trigger_time,
+            )
 
-        # If no manual target is set, only enable manual parameters when a shot starts acquiring
-        if manual_key is None:
-            if current_key:
-                self.manual_target_date, self.manual_target_index = current_key
-                self.manual_target_trigger_time = current_trigger
-                self.manual_confirmed_values = self._get_confirmed_for_key(current_key)
-                self.manual_values_pending_for_current_shot = False
-                self.manual_enabled = True
-                self._update_manual_confirm_state()
-                self._update_manual_confirm_display()
+            self.manual_target_date = manager_shot_date
+            self.manual_target_index = manager_shot_index
+            self.manual_target_trigger_time = manager_trigger_time
+            self.manual_confirmed_values = (
+                self._get_confirmed_for_key(manager_key)
+                if manager_key
+                else self._build_empty_manual_values()
+            )
+            self.manual_values_pending_for_current_shot = False
+        else:
+            if manager_key is not None and manager_trigger_time is not None:
+                self.manual_target_trigger_time = manager_trigger_time
+
+            if manual_key is not None:
+                self.manual_confirmed_values = self._get_confirmed_for_key(manual_key)
             else:
-                self.manual_enabled = False
-                self._update_manual_confirm_state()
-                self._update_manual_target_label()
-            return
+                self.manual_confirmed_values = self._build_empty_manual_values()
 
-        # If we are still on the same target (or waiting without a new acquisition), just refresh display
-        if current_key == manual_key or current_key is None:
-            self.manual_confirmed_values = self._get_confirmed_for_key(manual_key)
+        if self.manual_target_index is None:
+            self.manual_enabled = False
+            self.lbl_manual_target.configure(text="Manual parameters for: no shot yet")
+        else:
             self.manual_enabled = True
-            self._update_manual_confirm_state()
-            self._update_manual_confirm_display()
-            return
-
-        # A new shot has started acquiring: flush previous target then follow the new one
-        self._write_manual_line_for_key(manual_key, self.manual_target_trigger_time)
-        self.manual_values_pending_for_current_shot = False
-
-        self.manual_target_date, self.manual_target_index = current_key
-        self.manual_target_trigger_time = current_trigger
-        self.manual_confirmed_values = self._get_confirmed_for_key(current_key)
-        self.manual_values_pending_for_current_shot = False
-        self.manual_enabled = True
+            self.lbl_manual_target.configure(
+                text=f"Manual parameters for: shot {self.manual_target_index}"
+            )
 
         self._update_manual_confirm_state()
         self._update_manual_confirm_display()
+
+        self.manual_last_status_shot = manager_shot_index
+        self.manual_last_status_date = manager_shot_date
+        self.manual_last_status_state = shot_state
 
     def _flush_manual_params_on_stop(self):
         key = self._current_manual_key()
@@ -1431,7 +1471,9 @@ class ShotManagerGUI:
                 except Exception:
                     pass
 
-            self._write_manual_line_for_key(key, trigger)
+            self._write_manual_line_for_target(
+                self.manual_target_date, self.manual_target_index, trigger
+            )
 
         self._reset_manual_state()
 
