@@ -108,6 +108,7 @@ class FakeShotSimulator:
         for cam_name, spec_list in CAMERA_CONFIG.items():
             specs = [CameraFileSpec(keyword=s["keyword"], ext=s["ext"]) for s in spec_list]
             self.cameras.append(CameraConfig(name=cam_name, specs=specs))
+        self.active_camera_names: set[str] = {cam.name for cam in self.cameras}
 
         # Dictionnaire Axis -> position courante (pour les moteurs)
         self.motor_axes: dict[str, float] = {}
@@ -140,10 +141,22 @@ class FakeShotSimulator:
         return root / f"{MOTOR_HISTORY_PREFIX}{self.date.isoformat()}.csv"
 
     def set_cameras(self, cameras: list[CameraConfig]):
+        previous_names = {cam.name for cam in getattr(self, "cameras", [])}
         self.cameras = cameras
+        # Si la caméra était active avant, on la garde. Toute nouvelle caméra est activée par défaut.
+        if not hasattr(self, "active_camera_names"):
+            self.active_camera_names = set()
+        current_active = set(self.active_camera_names)
+        new_names = {cam.name for cam in cameras}
+        self.active_camera_names = (current_active & new_names) | (new_names - previous_names)
         print("[SIM] Cameras configuration updated:")
         for cam in self.cameras:
             print(f"  - {cam.name}: {[(s.keyword, s.ext) for s in cam.specs]}")
+
+    def set_active_cameras(self, active: set[str]):
+        """Définit les caméras temporairement actives sans toucher à la configuration."""
+        self.active_camera_names = set(active)
+        print("[SIM] Active cameras set to:", ", ".join(sorted(self.active_camera_names)))
 
     def set_max_delay(self, value: float):
         self.max_delay_sec = max(0.0, float(value))
@@ -346,7 +359,8 @@ class FakeShotSimulator:
         shot_number = self.shot_index
         print(f"[SIM] Generating shot {shot_number} at logical time {start_time}")
 
-        for cam in self.cameras:
+        active_cameras = [cam for cam in self.cameras if cam.name in self.active_camera_names]
+        for cam in active_cameras:
             for spec in cam.specs:
                 delay = random.uniform(0.0, self.max_delay_sec)
 
@@ -479,7 +493,10 @@ class SimulatorGUI:
         self.lbl_paths.pack(padx=10, pady=(0, 10), anchor="w")
 
         btn_cfg = tk.Button(root, text="Configure cameras...", command=self._open_camera_config)
-        btn_cfg.pack(padx=10, pady=(0, 10), anchor="w")
+        btn_cfg.pack(padx=10, pady=(0, 5), anchor="w")
+
+        btn_select_cams = tk.Button(root, text="Select Cameras", command=self._open_camera_selector)
+        btn_select_cams.pack(padx=10, pady=(0, 10), anchor="w")
 
         frm_delay = tk.Frame(root)
         frm_delay.pack(padx=10, pady=(0, 10), anchor="w")
@@ -575,7 +592,42 @@ class SimulatorGUI:
 
     def _refresh_camera_label(self):
         camera_names = ", ".join(cam.name for cam in self.sim.cameras)
-        self.lbl_cameras.config(text=f"Cameras: {camera_names}")
+        active = sorted(self.sim.active_camera_names)
+        active_text = ", ".join(active) if active else "None"
+        self.lbl_cameras.config(
+            text=f"Cameras: {camera_names}\nActive (temporary mask): {active_text}"
+        )
+
+    def _open_camera_selector(self):
+        top = tk.Toplevel(self.root)
+        top.title("Select Cameras")
+
+        vars_map: dict[str, tk.BooleanVar] = {}
+        for idx, cam in enumerate(self.sim.cameras):
+            var = tk.BooleanVar(value=cam.name in self.sim.active_camera_names)
+            vars_map[cam.name] = var
+            cb = tk.Checkbutton(top, text=cam.name, variable=var)
+            cb.grid(row=idx, column=0, sticky="w", padx=10, pady=2)
+
+        def on_ok():
+            active = {name for name, var in vars_map.items() if var.get()}
+            if not active:
+                if not messagebox.askyesno(
+                    "No camera active",
+                    "No camera is selected. Continue with empty selection?",
+                ):
+                    return
+            self.sim.set_active_cameras(active)
+            self._refresh_camera_label()
+            top.destroy()
+
+        def on_cancel():
+            top.destroy()
+
+        btn_frame = tk.Frame(top)
+        btn_frame.grid(row=len(self.sim.cameras), column=0, pady=10, padx=10, sticky="e")
+        tk.Button(btn_frame, text="OK", command=on_ok).grid(row=0, column=0, padx=5)
+        tk.Button(btn_frame, text="Cancel", command=on_cancel).grid(row=0, column=1, padx=5)
 
     def _open_camera_config(self):
         top = tk.Toplevel(self.root)
