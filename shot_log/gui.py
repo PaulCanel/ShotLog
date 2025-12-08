@@ -52,6 +52,9 @@ class ShotManagerGUI:
         self.manual_target_trigger_time: str | datetime | None = None
         self.manual_confirmed_values: dict[str, str] = {}
         self.manual_confirmed_by_shot: dict[tuple[str, int], dict[str, str]] = {}
+        self.manual_confirmed_meta_by_shot: dict[
+            tuple[str, int], dict[str | int, str | int | datetime | None]
+        ] = {}
         self.manual_written_keys: set[tuple[str, int]] = set()
         self.manual_last_written_key: tuple[str, int] | None = None
         self.manual_last_status_shot: int | None = None
@@ -1276,6 +1279,7 @@ class ShotManagerGUI:
         self.manual_last_written_key = None
         self.manual_confirmed_values = self._build_empty_manual_values()
         self.manual_confirmed_by_shot = {}
+        self.manual_confirmed_meta_by_shot = {}
         self.manual_written_keys = set()
         self.manual_values_pending_for_current_shot = False
         self.manual_enabled = False
@@ -1298,6 +1302,11 @@ class ShotManagerGUI:
 
         self._set_confirmed_for_key(key, values)
         self.manual_confirmed_values = values
+        self.manual_confirmed_meta_by_shot[key] = {
+            "shot_number": self.manual_target_index,
+            "date": self.manual_target_date,
+            "trigger_time": self.manual_target_trigger_time,
+        }
         self.manual_values_pending_for_current_shot = True
         self.logger.info(
             "[MANUAL] Confirm clicked for target shot=%s: %s",
@@ -1339,9 +1348,6 @@ class ShotManagerGUI:
         return p.with_suffix(".csv")
 
     def _write_manual_line_for_key(self, key: tuple[str, int], trigger_time: str | datetime | None):
-        if key == self.manual_last_written_key or key in self.manual_written_keys:
-            return
-
         output_path = self._get_manual_params_output_path()
         if output_path is None:
             self._append_log("[WARNING] Manual params CSV path not set; skipping write.")
@@ -1350,6 +1356,7 @@ class ShotManagerGUI:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         stored_values = self.manual_confirmed_by_shot.pop(key, None)
+        stored_meta = self.manual_confirmed_meta_by_shot.pop(key, None)
         current_key = self._current_manual_key()
 
         if stored_values is None and current_key == key:
@@ -1357,6 +1364,23 @@ class ShotManagerGUI:
 
         if stored_values is None:
             stored_values = self._build_empty_manual_values()
+
+        target_date = key[0]
+        target_shot_index = key[1]
+        target_trigger_time = trigger_time
+
+        if stored_meta:
+            target_date = stored_meta.get("date", target_date) or target_date
+            shot_index_val = stored_meta.get("shot_number", target_shot_index)
+            try:
+                target_shot_index = int(shot_index_val)
+            except (TypeError, ValueError):
+                target_shot_index = target_shot_index
+            target_trigger_time = stored_meta.get("trigger_time", target_trigger_time)
+
+        write_key = (target_date, target_shot_index)
+        if write_key == self.manual_last_written_key or write_key in self.manual_written_keys:
+            return
 
         values: dict[str, str] = {}
         for param in self.config.manual_params:
@@ -1367,15 +1391,15 @@ class ShotManagerGUI:
         write_manual_params_row(
             output_path,
             self.config.manual_params,
-            key[1],
-            trigger_time,
+            target_shot_index,
+            target_trigger_time,
             values,
         )
 
-        self.manual_written_keys.add(key)
-        self.manual_last_written_key = key
+        self.manual_written_keys.add(write_key)
+        self.manual_last_written_key = write_key
         self._append_log(
-            f"Manual parameters recorded for shot {key[1]:03d} ({key[0]}) -> {output_path}"
+            f"Manual parameters recorded for shot {target_shot_index:03d} ({target_date}) -> {output_path}"
         )
 
     def _write_manual_line_for_target(
