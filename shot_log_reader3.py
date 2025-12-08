@@ -11,6 +11,14 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 
+GREEN_BG = "#006400"  # DarkGreen
+BLUE_BG = "#00008B"  # DarkBlue
+RED_BG = "#8B0000"  # DarkRed
+ORANGE_BG = "#FF8C00"  # DarkOrange
+TEXT_DEFAULT = "white"
+TEXT_WARNING = "#FFFF00"
+
+
 # ==========================
 # Helpers / models
 # ==========================
@@ -29,10 +37,11 @@ class LogShot:
 
 @dataclass
 class ShotViewRow:
-    key: tuple[str, int]
+    key: tuple[int, str]
     values: list[str]
     bg: str
     yellow_text: bool
+    incomplete: bool = False
 
 
 class LogParser:
@@ -160,8 +169,10 @@ class ShotLogReader:
         self.motor_path: Path | None = None
 
         self.log_parser = LogParser()
-        self.manual_rows: list[dict] = []
-        self.motor_rows: list[dict] = []
+        self.manual_rows: list[list[str]] = []
+        self.motor_rows: list[list[str]] = []
+        self.manual_header: list[str] = []
+        self.motor_header: list[str] = []
 
         self.observer = Observer()
         self.watch_schedules = []
@@ -172,6 +183,7 @@ class ShotLogReader:
             "manual": [],
             "motor": [],
         }
+        self.shot_lookup: dict[tuple[int, str], LogShot] = {}
 
         self._build_ui()
 
@@ -191,21 +203,22 @@ class ShotLogReader:
         self.trees = {}
         for key, title, columns in [
             ("log", "Logs", ["Date", "Shot", "Expected", "Missing", "Trigger", "Status"]),
-            ("manual", "Manual Params", ["Date", "Shot", "Time", "Data"]),
-            ("motor", "Motor Params", ["Date", "Shot", "Time", "Data"]),
+            ("manual", "Manual Params", []),
+            ("motor", "Motor Params", []),
         ]:
             frame = ttk.Frame(self.notebook)
             self.notebook.add(frame, text=title)
             tree = ttk.Treeview(frame, columns=columns, show="headings")
-            for col in columns:
-                tree.heading(col, text=col)
-                tree.column(col, width=140, anchor="center")
+            if columns:
+                for col in columns:
+                    tree.heading(col, text=col)
+                    tree.column(col, width=140, anchor="center")
             tree.pack(fill="both", expand=True)
-            tree.tag_configure("bg_green", background="#7FFF7F")
-            tree.tag_configure("bg_blue", background="#7FBFFF")
-            tree.tag_configure("bg_red", background="#FF7F7F")
-            tree.tag_configure("bg_orange", background="#FFB347")
-            tree.tag_configure("fg_yellow", foreground="#FFFF00")
+            tree.tag_configure("bg_green", background=GREEN_BG, foreground=TEXT_DEFAULT)
+            tree.tag_configure("bg_blue", background=BLUE_BG, foreground=TEXT_DEFAULT)
+            tree.tag_configure("bg_red", background=RED_BG, foreground=TEXT_DEFAULT)
+            tree.tag_configure("bg_orange", background=ORANGE_BG, foreground=TEXT_DEFAULT)
+            tree.tag_configure("fg_yellow", foreground=TEXT_WARNING)
             self.trees[key] = tree
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -262,34 +275,48 @@ class ShotLogReader:
             if self.log_path:
                 self.log_parser.parse(self.log_path)
             if self.manual_path:
-                self.manual_rows = self._parse_csv(self.manual_path)
+                self.manual_header, self.manual_rows = self._parse_csv(self.manual_path)
+                self._configure_csv_tree("manual", self.manual_header)
             if self.motor_path:
-                self.motor_rows = self._parse_csv(self.motor_path)
+                self.motor_header, self.motor_rows = self._parse_csv(self.motor_path)
+                self._configure_csv_tree("motor", self.motor_header)
             self._refresh_tables()
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def _parse_csv(self, path: Path) -> list[dict]:
-        rows: list[dict] = []
+    def _parse_csv(self, path: Path) -> tuple[list[str], list[list[str]]]:
+        header: list[str] = []
+        rows: list[list[str]] = []
         with path.open("r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
+            reader = csv.reader(f, delimiter=",", quotechar='"')
+            header = next(reader, [])
             for row in reader:
                 rows.append(row)
-        return rows
+        return header, rows
+
+    def _configure_csv_tree(self, source: str, header: list[str]):
+        tree = self.trees[source]
+        tree.delete(*tree.get_children())
+        tree["columns"] = header
+        tree["show"] = "headings"
+        for col in header:
+            tree.heading(col, text=col)
+            tree.column(col, width=140, anchor="center")
 
     # ---------- Table rendering ----------
     def _refresh_tables(self):
         self.previous_rows = {"log": [], "manual": [], "motor": []}
         log_rows = self._build_log_rows()
-        manual_rows = self._build_csv_rows(self.manual_rows)
-        motor_rows = self._build_csv_rows(self.motor_rows)
+        manual_rows = self._build_csv_rows(self.manual_header, self.manual_rows, "manual")
+        motor_rows = self._build_csv_rows(self.motor_header, self.motor_rows, "motor")
 
-        union_keys = {row.key for row in log_rows} | {row.key for row in manual_rows} | {row.key for row in motor_rows}
-        log_rows = self._ensure_rows(log_rows, union_keys, "log")
-        manual_rows = self._ensure_rows(manual_rows, union_keys, "manual")
-        motor_rows = self._ensure_rows(motor_rows, union_keys, "motor")
+        all_keys = {row.key for row in log_rows} | {row.key for row in manual_rows} | {row.key for row in motor_rows}
+        yellow_keys = self._compute_yellow_keys(log_rows, manual_rows, motor_rows, all_keys)
+        log_rows = self._apply_log_backgrounds(log_rows, yellow_keys)
 
-        yellow_keys = self._compute_yellow_keys(log_rows, manual_rows, motor_rows)
+        log_rows = self._ensure_rows(log_rows, all_keys, "log")
+        manual_rows = self._ensure_rows(manual_rows, all_keys, "manual", header=self.manual_header)
+        motor_rows = self._ensure_rows(motor_rows, all_keys, "motor", header=self.motor_header)
 
         self._render_rows("log", log_rows, yellow_keys)
         self._render_rows("manual", manual_rows, yellow_keys)
@@ -297,8 +324,9 @@ class ShotLogReader:
 
     def _build_log_rows(self) -> list[ShotViewRow]:
         rows: list[ShotViewRow] = []
-        for key in sorted(self.log_parser.shots.keys()):
-            shot = self.log_parser.shots[key]
+        self.shot_lookup = {}
+        shots = sorted(self.log_parser.shots.values(), key=lambda s: (s.date, s.shot))
+        for shot in shots:
             status = "ongoing" if shot.status == "ongoing" else ("complete" if not shot.missing else "missing")
             values = [
                 shot.date,
@@ -308,73 +336,154 @@ class ShotLogReader:
                 ", ".join(sorted(shot.trigger_cams)),
                 status,
             ]
-            bg = self._determine_bg("log", values, incomplete=(shot.status == "ongoing"))
-            if shot.status == "ongoing":
-                bg = "orange"
-            rows.append(ShotViewRow(key=key, values=values, bg=bg, yellow_text=bool(shot.missing)))
+            key = self._make_key(shot.shot, shot.trigger_time or shot.date)
+            self.shot_lookup[key] = shot
+            rows.append(
+                ShotViewRow(
+                    key=key,
+                    values=values,
+                    bg="red" if shot.missing else "green",
+                    yellow_text=False,
+                    incomplete=shot.status == "ongoing" or bool(shot.missing),
+                )
+            )
         return rows
 
-    def _build_csv_rows(self, csv_rows: list[dict]) -> list[ShotViewRow]:
+    def _build_csv_rows(self, header: list[str], csv_rows: list[list[str]], source: str) -> list[ShotViewRow]:
         rows: list[ShotViewRow] = []
-        for row in csv_rows:
-            date = row.get("Date") or row.get("date") or ""
-            shot_str = row.get("Shot") or row.get("shot") or row.get("Index") or ""
-            try:
-                shot_num = int(shot_str)
-                shot_disp = f"{shot_num:04d}"
-            except Exception:
-                shot_num = 0
-                shot_disp = shot_str
-            time_val = row.get("Time") or row.get("time") or ""
-            other = [f"{k}={v}" for k, v in row.items() if k not in {"Date", "date", "Shot", "shot", "Index", "Time", "time"}]
-            values = [date, shot_disp, time_val, "; ".join(other)]
-            key = (date, shot_num)
-            incomplete = all(not v for v in other)
-            bg = self._determine_bg("manual" if csv_rows is self.manual_rows else "motor", values, incomplete=incomplete)
-            rows.append(ShotViewRow(key=key, values=values, bg=bg, yellow_text=False))
+        if not header:
+            return rows
+
+        for csv_row in csv_rows:
+            values = csv_row + [""] * (len(header) - len(csv_row))
+            key = self._extract_key_from_header(header, values)
+            incomplete = self._is_csv_row_incomplete(header, values)
+            rows.append(
+                ShotViewRow(
+                    key=key,
+                    values=values,
+                    bg="red" if incomplete else "blue",
+                    yellow_text=False,
+                    incomplete=incomplete,
+                )
+            )
         rows.sort(key=lambda r: (r.key[0], r.key[1]))
+        prev_values: list[str] | None = None
+        for row in rows:
+            row.bg = self._determine_generic_bg(prev_values, row.values, row.incomplete)
+            prev_values = row.values
         return rows
 
-    def _ensure_rows(self, rows: list[ShotViewRow], all_keys: set[tuple[str, int]], source: str) -> list[ShotViewRow]:
+    def _ensure_rows(
+        self,
+        rows: list[ShotViewRow],
+        all_keys: set[tuple[int, str]],
+        source: str,
+        header: list[str] | None = None,
+    ) -> list[ShotViewRow]:
         existing = {r.key for r in rows}
         for key in all_keys - existing:
-            date_str, shot_idx = key
+            shot_idx, trigger_time = key
             shot_disp = f"{shot_idx:04d}" if shot_idx else ""
             if source == "log":
-                values = [date_str, shot_disp, "", "", "", "incomplete"]
+                values = ["", shot_disp, "", "", "", "incomplete"]
             else:
-                values = [date_str, shot_disp, "", ""]
-            bg = self._determine_bg(source, values, incomplete=True)
-            rows.append(ShotViewRow(key=key, values=values, bg=bg, yellow_text=False))
+                cols = header or []
+                values = [""] * len(cols)
+            bg = "red"
+            rows.append(ShotViewRow(key=key, values=values, bg=bg, yellow_text=False, incomplete=True))
         rows.sort(key=lambda r: (r.key[0], r.key[1]))
         return rows
 
-    def _determine_bg(self, source: str, values: list[str], incomplete: bool) -> str:
-        prev = self.previous_rows.get(source, [])
-        bg = "blue"
+    def _determine_generic_bg(self, prev_values: list[str] | None, values: list[str], incomplete: bool) -> str:
         if incomplete:
             return "red"
-        if prev:
-            last_vals = prev[-1]
-            bg = "blue" if last_vals == values else "green"
-        self.previous_rows[source] = prev + [values]
-        return bg
+        if prev_values is None or prev_values == values:
+            return "blue"
+        return "green"
 
-    def _compute_yellow_keys(self, log_rows, manual_rows, motor_rows):
-        all_keys = {row.key for row in log_rows} | {row.key for row in manual_rows} | {row.key for row in motor_rows}
-        present_log = {row.key for row in log_rows}
-        present_manual = {row.key for row in manual_rows}
-        present_motor = {row.key for row in motor_rows}
+    def _compute_yellow_keys(self, log_rows, manual_rows, motor_rows, all_keys):
         yellow = set()
+
+        def build_counts(rows):
+            counts = {}
+            incomplete_keys = set()
+            for r in rows:
+                counts[r.key] = counts.get(r.key, 0) + 1
+                if r.incomplete:
+                    incomplete_keys.add(r.key)
+            return counts, incomplete_keys
+
+        manual_counts, manual_incomplete = build_counts(manual_rows)
+        motor_counts, motor_incomplete = build_counts(motor_rows)
+
         for key in all_keys:
-            log_shot = self.log_parser.shots.get(key)
-            missing_cam = bool(log_shot and log_shot.missing)
-            sources_present = sum([key in present_log, key in present_manual, key in present_motor])
-            if sources_present < 3 or missing_cam:
+            manual_issue = manual_counts.get(key, 0) != 1 or key in manual_incomplete
+            motor_issue = motor_counts.get(key, 0) != 1 or key in motor_incomplete
+            if manual_issue or motor_issue:
                 yellow.add(key)
         return yellow
 
-    def _render_rows(self, source: str, rows: list[ShotViewRow], yellow_keys: set[tuple[str, int]]):
+    def _apply_log_backgrounds(self, log_rows: list[ShotViewRow], yellow_keys: set[tuple[int, str]]):
+        prev_values: list[str] | None = None
+        for row in log_rows:
+            shot = self.shot_lookup.get(row.key)
+            if not shot:
+                row.bg = "red"
+                row.incomplete = True
+                continue
+
+            if shot.status == "ongoing":
+                row.bg = "orange"
+                row.incomplete = True
+                prev_values = row.values
+                continue
+
+            if shot.missing:
+                row.bg = "red"
+                row.incomplete = True
+            else:
+                csv_ok = row.key not in yellow_keys
+                if csv_ok and (prev_values is None or prev_values == row.values):
+                    row.bg = "blue"
+                else:
+                    row.bg = "green"
+                row.incomplete = False
+            prev_values = row.values
+        return log_rows
+
+    @staticmethod
+    def _make_key(shot_num: int | None, trigger_time: str | None) -> tuple[int, str]:
+        try:
+            shot_idx = int(shot_num) if shot_num is not None else -1
+        except Exception:
+            shot_idx = -1
+        return shot_idx, trigger_time or ""
+
+    def _extract_key_from_header(self, header: list[str], values: list[str]) -> tuple[int, str]:
+        header_lower = [h.lower() for h in header]
+        shot_idx = next((i for i, h in enumerate(header_lower) if h in {"shot_number", "shot", "index"}), None)
+        time_idx = next((i for i, h in enumerate(header_lower) if h in {"trigger_time", "time"}), None)
+        shot_val = values[shot_idx] if shot_idx is not None and shot_idx < len(values) else ""
+        trigger_time = values[time_idx] if time_idx is not None and time_idx < len(values) else ""
+        return self._make_key(shot_val if shot_val != "" else -1, trigger_time)
+
+    def _is_csv_row_incomplete(self, header: list[str], values: list[str]) -> bool:
+        header_lower = [h.lower() for h in header]
+        shot_idx = next((i for i, h in enumerate(header_lower) if h in {"shot_number", "shot", "index"}), None)
+        time_idx = next((i for i, h in enumerate(header_lower) if h in {"trigger_time", "time"}), None)
+        shot_val = values[shot_idx].strip() if shot_idx is not None and shot_idx < len(values) else ""
+        time_val = values[time_idx].strip() if time_idx is not None and time_idx < len(values) else ""
+        other_values = [
+            values[i].strip()
+            for i in range(len(header))
+            if i < len(values) and i not in {shot_idx, time_idx}
+        ]
+        missing_fields = len(values) < len(header)
+        empty_other = all(v == "" for v in other_values)
+        return missing_fields or shot_val == "" or time_val == "" or empty_other
+
+    def _render_rows(self, source: str, rows: list[ShotViewRow], yellow_keys: set[tuple[int, str]]):
         tree = self.trees[source]
         tree.delete(*tree.get_children())
         for row in rows:
@@ -404,15 +513,17 @@ class ShotLogReader:
         if not xlsx_path:
             return
         log_rows = self._build_log_rows()
-        manual_rows = self._build_csv_rows(self.manual_rows)
-        motor_rows = self._build_csv_rows(self.motor_rows)
-        yellow_keys = self._compute_yellow_keys(log_rows, manual_rows, motor_rows)
+        manual_rows = self._build_csv_rows(self.manual_header, self.manual_rows, "manual")
+        motor_rows = self._build_csv_rows(self.motor_header, self.motor_rows, "motor")
+        all_keys = {row.key for row in log_rows} | {row.key for row in manual_rows} | {row.key for row in motor_rows}
+        yellow_keys = self._compute_yellow_keys(log_rows, manual_rows, motor_rows, all_keys)
+        log_rows = self._apply_log_backgrounds(log_rows, yellow_keys)
 
         wb = Workbook()
         sheets = {
             "Logs": (log_rows, ["Date", "Shot", "Expected", "Missing", "Trigger", "Status"]),
-            "Manual_Params": (manual_rows, ["Date", "Shot", "Time", "Data"]),
-            "Motor_Params": (motor_rows, ["Date", "Shot", "Time", "Data"]),
+            "Manual_Params": (manual_rows, self.manual_header),
+            "Motor_Params": (motor_rows, self.motor_header),
         }
 
         for idx, (title, (rows, headers)) in enumerate(sheets.items()):
@@ -431,14 +542,15 @@ class ShotLogReader:
 
     def _apply_excel_styles(self, ws, row_idx: int, row: ShotViewRow, yellow_keys):
         color_map = {
-            "green": "7FFF7F",
-            "blue": "7FBFFF",
-            "red": "FF7F7F",
-            "orange": "FFB347",
+            "green": GREEN_BG.lstrip("#"),
+            "blue": BLUE_BG.lstrip("#"),
+            "red": RED_BG.lstrip("#"),
+            "orange": ORANGE_BG.lstrip("#"),
         }
         fill_color = color_map.get(row.bg)
         fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid") if fill_color else None
-        font = Font(color="FFFF00") if (row.key in yellow_keys or row.yellow_text) else None
+        font_color = TEXT_WARNING.lstrip("#") if (row.key in yellow_keys or row.yellow_text) else TEXT_DEFAULT
+        font = Font(color=font_color)
         for cell in ws[row_idx]:
             if fill:
                 cell.fill = fill
