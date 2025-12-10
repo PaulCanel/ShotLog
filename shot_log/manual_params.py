@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from .config import ManualParam
 from .utils import ensure_dir
@@ -112,3 +112,143 @@ def write_manual_params_row(
         output_path.write_text(header_line + "\n", encoding="utf-8")
     with output_path.open("a", encoding="utf-8") as f:
         f.write(",".join(row_values) + "\n")
+
+
+class ManualParamsManager:
+    """State machine to track manual parameters per shot.
+
+    A pending row is only written when a new shot starts or when the user presses
+    Stop. Confirmed values are never discarded without being written.
+    """
+
+    def __init__(
+        self,
+        manual_params: Sequence[ManualParam],
+        csv_path_provider: Callable[[], Path | None],
+        log_fn: Callable[[str], None] | None = None,
+    ):
+        self.manual_params: list[ManualParam] = list(manual_params)
+        self.param_names: list[str] = [p.name for p in self.manual_params]
+        self._csv_path_provider = csv_path_provider
+        self.log_fn = log_fn or (lambda msg: logger.info(msg))
+
+        self.current_date_str: str | None = None
+        self.current_shot_index: int | None = None
+        self.current_trigger_time_str: str | None = None
+        self.current_confirmed_values: list[str] = ["" for _ in self.param_names]
+        self._current_has_confirm: bool = False
+
+        self.pending_date_str: str | None = None
+        self.pending_shot_index: int | None = None
+        self.pending_trigger_time_str: str | None = None
+        self.pending_values: list[str] = []
+        self.has_pending_row: bool = False
+
+    # ---------------------------
+    # Helpers
+    # ---------------------------
+    def _log(self, msg: str):
+        try:
+            self.log_fn(msg)
+        except Exception:
+            logger.info(msg)
+
+    def _reset_current_confirmed(self):
+        self.current_confirmed_values = ["" for _ in self.param_names]
+        self._current_has_confirm = False
+
+    def _build_empty_values(self) -> list[str]:
+        return ["" for _ in self.param_names]
+
+    def _get_csv_path(self) -> Path | None:
+        path = self._csv_path_provider()
+        return path.with_suffix(".csv") if path else None
+
+    def update_manual_params(self, manual_params: Sequence[ManualParam]):
+        self.manual_params = list(manual_params)
+        self.param_names = [p.name for p in self.manual_params]
+        self._reset_current_confirmed()
+        if not self.has_pending_row:
+            self.pending_values = []
+
+    # ---------------------------
+    # Events
+    # ---------------------------
+    def on_shot_started(self, date_str: str, shot_index: int, trigger_time_str: str | None):
+        if self.has_pending_row:
+            self._write_pending_row_to_csv()
+
+        self.current_date_str = date_str
+        self.current_shot_index = shot_index
+        self.current_trigger_time_str = _format_trigger_time(trigger_time_str)
+        self._reset_current_confirmed()
+
+    def on_shot_closed(
+        self,
+        date_str: str,
+        shot_index: int,
+        trigger_time_str: str | None,
+        acquired_ok: bool,
+        missing_cameras_list: Sequence[str] | None = None,
+    ):
+        self.pending_date_str = date_str
+        self.pending_shot_index = shot_index
+        self.pending_trigger_time_str = _format_trigger_time(trigger_time_str)
+
+        if self.current_shot_index == shot_index and self._current_has_confirm:
+            self.pending_values = list(self.current_confirmed_values)
+        else:
+            self.pending_values = self._build_empty_values()
+
+        self.has_pending_row = True
+
+    def on_confirm_clicked(self, new_values: Sequence[str]):
+        self.current_confirmed_values = [str(v).strip() if v is not None else "" for v in new_values]
+        self._current_has_confirm = True
+
+        if self.has_pending_row and self.pending_shot_index == self.current_shot_index:
+            self.pending_values = list(self.current_confirmed_values)
+
+    def flush_pending_on_stop(self):
+        if self.has_pending_row:
+            self._write_pending_row_to_csv()
+        self.current_date_str = None
+        self.current_shot_index = None
+        self.current_trigger_time_str = None
+        self._reset_current_confirmed()
+
+    # ---------------------------
+    # Writing
+    # ---------------------------
+    def _write_pending_row_to_csv(self):
+        if not self.has_pending_row:
+            return
+
+        csv_path = self._get_csv_path()
+        if csv_path is None:
+            self._log("[WARNING] Manual params CSV path not set; skipping write of pending row.")
+            return
+
+        values_dict = {name: val for name, val in zip(self.param_names, self.pending_values)}
+        write_manual_params_row(
+            csv_path,
+            self.manual_params,
+            int(self.pending_shot_index) if self.pending_shot_index is not None else 0,
+            self.pending_trigger_time_str,
+            values_dict,
+        )
+
+        self._log(
+            "Manual parameters recorded for shot %03d (%s) -> %s"
+            % (
+                int(self.pending_shot_index) if self.pending_shot_index is not None else 0,
+                self.pending_date_str,
+                csv_path,
+            )
+        )
+
+        self.has_pending_row = False
+        self.pending_values = []
+        self.pending_date_str = None
+        self.pending_shot_index = None
+        self.pending_trigger_time_str = None
