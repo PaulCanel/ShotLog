@@ -19,7 +19,7 @@ from .config import (
     _parse_extensions_field,
 )
 from .manager import ShotManager
-from .manual_params import build_empty_manual_values, write_manual_params_row
+from .manual_params import ManualParamsManager, build_empty_manual_values
 
 # ============================================================
 #  TKINTER GUI
@@ -51,16 +51,8 @@ class ShotManagerGUI:
         self.manual_target_index: int | None = None
         self.manual_target_trigger_time: str | datetime | None = None
         self.manual_confirmed_values: dict[str, str] = {}
-        self.manual_confirmed_by_shot: dict[tuple[str, int], dict[str, str]] = {}
-        self.manual_confirmed_meta_by_shot: dict[
-            tuple[str, int], dict[str | int, str | int | datetime | None]
-        ] = {}
-        self.manual_written_keys: set[tuple[str, int]] = set()
-        self.manual_last_written_key: tuple[str, int] | None = None
-        self.manual_last_status_shot: int | None = None
-        self.manual_last_status_date: str | None = None
+        self.manual_last_completed_key: tuple[str, int] | None = None
         self.manual_last_status_state: str | None = None
-        self.manual_values_pending_for_current_shot: bool = False
         self.manual_enabled: bool = False
         self.var_manual_params_csv = tk.StringVar(value=self.config.manual_params_csv_path or "")
         self.var_use_default_manual_params = tk.BooleanVar(
@@ -69,6 +61,7 @@ class ShotManagerGUI:
         self.var_use_default_motor_output = tk.BooleanVar(
             value=self.config.use_default_motor_positions_path
         )
+        self.var_show_console = tk.BooleanVar(value=True)
 
         self._default_manual_path: Path | None = None
         self._default_manual_clean_root: Path | None = None
@@ -78,6 +71,12 @@ class ShotManagerGUI:
         self.btn_manual_params_browse: ttk.Button | None = None
         self.ent_motor_output: ttk.Entry | None = None
         self.btn_motor_output_browse: ttk.Button | None = None
+
+        self.manual_manager = ManualParamsManager(
+            self.config.manual_params,
+            self._get_manual_params_output_path,
+            log_fn=self._append_log,
+        )
 
         self._number_validator = self.root.register(self._validate_number_entry)
 
@@ -95,8 +94,17 @@ class ShotManagerGUI:
     # ---------------------------
 
     def _build_gui(self):
+        self.main_pane = ttk.PanedWindow(self.root, orient="vertical")
+        self.main_pane.pack(fill="both", expand=True)
+
+        self.top_frame = ttk.Frame(self.main_pane)
+        self.bottom_log_frame = ttk.Frame(self.main_pane)
+
+        self.main_pane.add(self.top_frame, weight=3)
+        self.main_pane.add(self.bottom_log_frame, weight=1)
+
         # Scrollable container for main controls
-        main_container = ttk.Frame(self.root)
+        main_container = ttk.Frame(self.top_frame)
         main_container.pack(fill="both", expand=True)
 
         self.content_canvas = tk.Canvas(main_container, highlightthickness=0)
@@ -245,29 +253,6 @@ class ShotManagerGUI:
         ).grid(row=0, column=4, padx=5, sticky="w")
         frm_manual_cfg.columnconfigure(2, weight=1)
 
-        frm_manual_params = ttk.LabelFrame(self.content_frame, text="Manual parameters (per shot)")
-        frm_manual_params.pack(fill="x", padx=5, pady=5)
-        manual_header = ttk.Frame(frm_manual_params)
-        manual_header.grid(row=0, column=0, sticky="we", padx=5, pady=(0, 5))
-        self.lbl_manual_target = ttk.Label(manual_header, text="Manual parameters for: no shot yet")
-        self.lbl_manual_target.grid(row=0, column=0, sticky="w")
-
-        self.manual_confirm_values_frame = ttk.Frame(frm_manual_params)
-        self.manual_confirm_values_frame.grid(row=1, column=0, sticky="we", padx=5, pady=(0, 10))
-
-        self.frm_manual_params_fields = ttk.Frame(frm_manual_params)
-        self.frm_manual_params_fields.grid(row=2, column=0, sticky="we", padx=5, pady=5)
-
-        self.btn_manual_confirm = ttk.Button(
-            frm_manual_params, text="Confirm", command=self._on_manual_confirm_clicked, state="disabled"
-        )
-        self.btn_manual_confirm.grid(row=3, column=0, sticky="e", padx=5, pady=(0, 5))
-
-        frm_manual_params.columnconfigure(0, weight=1)
-
-        self._rebuild_manual_confirm_display()
-        self._rebuild_manual_param_fields()
-
         frm_motor = ttk.LabelFrame(self.content_frame, text="Motor data")
         frm_motor.pack(fill="x", padx=5, pady=5)
 
@@ -302,6 +287,29 @@ class ShotManagerGUI:
             row=3, column=0, columnspan=3, sticky="w", padx=5, pady=5
         )
         frm_motor.columnconfigure(1, weight=1)
+
+        frm_manual_params = ttk.LabelFrame(self.content_frame, text="Manual parameters (per shot)")
+        frm_manual_params.pack(fill="x", padx=5, pady=5)
+        manual_header = ttk.Frame(frm_manual_params)
+        manual_header.grid(row=0, column=0, sticky="we", padx=5, pady=(0, 5))
+        self.lbl_manual_target = ttk.Label(manual_header, text="Manual parameters for: no shot yet")
+        self.lbl_manual_target.grid(row=0, column=0, sticky="w")
+
+        self.manual_confirm_values_frame = ttk.Frame(frm_manual_params)
+        self.manual_confirm_values_frame.grid(row=1, column=0, sticky="we", padx=5, pady=(0, 10))
+
+        self.frm_manual_params_fields = ttk.Frame(frm_manual_params)
+        self.frm_manual_params_fields.grid(row=2, column=0, sticky="we", padx=5, pady=5)
+
+        self.btn_manual_confirm = ttk.Button(
+            frm_manual_params, text="Confirm", command=self._on_manual_confirm_clicked, state="disabled"
+        )
+        self.btn_manual_confirm.grid(row=3, column=0, sticky="e", padx=5, pady=(0, 5))
+
+        frm_manual_params.columnconfigure(0, weight=1)
+
+        self._rebuild_manual_confirm_display()
+        self._rebuild_manual_param_fields()
 
         # Next shot
         frm_next = ttk.LabelFrame(self.content_frame, text="Next Shot Number")
@@ -383,11 +391,20 @@ class ShotManagerGUI:
         self.lbl_current_status.grid(row=7, column=1, sticky="w")
 
         # Logs
-        frm_logs = ttk.LabelFrame(self.root, text="Logs")
+        frm_logs = ttk.LabelFrame(self.bottom_log_frame, text="Logs")
         frm_logs.pack(fill="both", expand=True, padx=5, pady=5)
 
+        log_header = ttk.Frame(frm_logs)
+        log_header.pack(fill="x", padx=5, pady=(5, 0))
+        ttk.Checkbutton(
+            log_header,
+            text="Show console",
+            variable=self.var_show_console,
+            command=self._toggle_console_visibility,
+        ).pack(side="right")
+
         self.txt_logs = scrolledtext.ScrolledText(frm_logs, wrap="word", height=20)
-        self.txt_logs.pack(fill="both", expand=True)
+        self.txt_logs.pack(fill="both", expand=True, padx=5, pady=5)
         self.txt_logs.configure(state="disabled")
 
     def _update_date_mode_label(self):
@@ -1179,6 +1196,7 @@ class ShotManagerGUI:
             child.destroy()
         self.manual_param_vars = {}
         self.manual_entries = {}
+        self._sync_manual_manager()
 
         if not self.config.manual_params:
             ttk.Label(self.frm_manual_params_fields, text="No manual parameters defined.").grid(
@@ -1232,19 +1250,15 @@ class ShotManagerGUI:
         for var in self.manual_param_vars.values():
             var.set("")
 
-    def _current_manual_key(self) -> tuple[str, int] | None:
-        if self.manual_target_date is None or self.manual_target_index is None:
-            return None
-        return (self.manual_target_date, self.manual_target_index)
-
-    def _get_confirmed_for_key(self, key: tuple[str, int]) -> dict[str, str]:
-        return self.manual_confirmed_by_shot.get(key, self._build_empty_manual_values())
-
-    def _set_confirmed_for_key(self, key: tuple[str, int], values: dict[str, str]):
-        self.manual_confirmed_by_shot[key] = {k: v for k, v in values.items()}
-
     def _build_empty_manual_values(self) -> dict[str, str]:
         return build_empty_manual_values(self.config.manual_params)
+
+    def _manual_param_names(self) -> list[str]:
+        return [p.name for p in self.config.manual_params]
+
+    def _sync_manual_manager(self):
+        if self.manual_manager:
+            self.manual_manager.update_manual_params(self.config.manual_params)
 
     def _update_manual_target_label(self):
         if self.manual_target_index is None:
@@ -1273,15 +1287,9 @@ class ShotManagerGUI:
         self.manual_target_date = None
         self.manual_target_index = None
         self.manual_target_trigger_time = None
-        self.manual_last_status_shot = None
-        self.manual_last_status_date = None
         self.manual_last_status_state = None
-        self.manual_last_written_key = None
+        self.manual_last_completed_key = None
         self.manual_confirmed_values = self._build_empty_manual_values()
-        self.manual_confirmed_by_shot = {}
-        self.manual_confirmed_meta_by_shot = {}
-        self.manual_written_keys = set()
-        self.manual_values_pending_for_current_shot = False
         self.manual_enabled = False
         self._update_manual_confirm_state()
         self.lbl_manual_target.configure(text="Manual parameters for: no shot yet")
@@ -1291,23 +1299,20 @@ class ShotManagerGUI:
         if not self.manual_enabled:
             return
 
-        key = self._current_manual_key()
-        if key is None:
+        if self.manual_manager.current_shot_index is None:
             return
 
+        names = self._manual_param_names()
+        values_list: list[str] = []
         values: dict[str, str] = {}
-        for name, entry in self.manual_entries.items():
-            raw = entry.get().strip()
+        for name in names:
+            entry = self.manual_entries.get(name)
+            raw = entry.get().strip() if entry else ""
             values[name] = raw
+            values_list.append(raw)
 
-        self._set_confirmed_for_key(key, values)
+        self.manual_manager.on_confirm_clicked(values_list)
         self.manual_confirmed_values = values
-        self.manual_confirmed_meta_by_shot[key] = {
-            "shot_number": self.manual_target_index,
-            "date": self.manual_target_date,
-            "trigger_time": self.manual_target_trigger_time,
-        }
-        self.manual_values_pending_for_current_shot = True
         self.logger.info(
             "[MANUAL] Confirm clicked for target shot=%s: %s",
             self.manual_target_index,
@@ -1347,187 +1352,71 @@ class ShotManagerGUI:
 
         return p.with_suffix(".csv")
 
-    def _write_manual_line_for_key(self, key: tuple[str, int], trigger_time: str | datetime | None):
-        output_path = self._get_manual_params_output_path()
-        if output_path is None:
-            self._append_log("[WARNING] Manual params CSV path not set; skipping write.")
-            return
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        stored_values = self.manual_confirmed_by_shot.pop(key, None)
-        stored_meta = self.manual_confirmed_meta_by_shot.pop(key, None)
-        current_key = self._current_manual_key()
-
-        if stored_values is None and current_key == key:
-            stored_values = {k: v for k, v in self.manual_confirmed_values.items()}
-
-        if stored_values is None:
-            stored_values = self._build_empty_manual_values()
-
-        target_date = key[0]
-        target_shot_index = key[1]
-        target_trigger_time = trigger_time
-
-        if stored_meta:
-            target_date = stored_meta.get("date", target_date) or target_date
-            shot_index_val = stored_meta.get("shot_number", target_shot_index)
-            try:
-                target_shot_index = int(shot_index_val)
-            except (TypeError, ValueError):
-                target_shot_index = target_shot_index
-            target_trigger_time = stored_meta.get("trigger_time", target_trigger_time)
-
-        write_key = (target_date, target_shot_index)
-        if write_key == self.manual_last_written_key or write_key in self.manual_written_keys:
-            return
-
-        values: dict[str, str] = {}
-        for param in self.config.manual_params:
-            name = param.name
-            raw_val = stored_values.get(name, "")
-            values[name] = "" if raw_val in ("", "-") else raw_val
-
-        write_manual_params_row(
-            output_path,
-            self.config.manual_params,
-            target_shot_index,
-            target_trigger_time,
-            values,
-        )
-
-        self.manual_written_keys.add(write_key)
-        self.manual_last_written_key = write_key
-        self._append_log(
-            f"Manual parameters recorded for shot {target_shot_index:03d} ({target_date}) -> {output_path}"
-        )
-
-    def _write_manual_line_for_target(
-        self,
-        target_date: str | None,
-        target_index: int | None,
-        trigger_time: str | datetime | None,
-    ):
-        if target_date is None or target_index is None:
-            return
-
-        key = (target_date, target_index)
-        if key == self.manual_last_written_key:
-            return
-
-        self.logger.info(
-            "[MANUAL] Writing CSV line for shot=%s, time=%s, confirmed=%s",
-            self.manual_target_index,
-            trigger_time,
-            self.manual_confirmed_values,
-        )
-
-        self._write_manual_line_for_key(key, trigger_time)
-
     def _handle_manual_params_status(self, status: dict):
         status = status or {}
         shot_state = status.get("shot_state") or status.get("current_shot_state")
-
-        pending_date = status.get("pending_shot_date")
-        pending_index = status.get("pending_shot_index")
-        pending_trigger = status.get("pending_shot_trigger_time")
-
-        if pending_date is None and status.get("current_shot_state") == "acquiring":
-            pending_date = status.get("current_shot_date")
-            pending_index = status.get("current_shot_index")
-            pending_trigger = status.get("current_shot_trigger_time")
+        current_date = status.get("current_shot_date")
+        current_index = status.get("current_shot_index")
+        current_trigger = status.get("current_shot_trigger_time")
 
         last_completed_idx = status.get("last_completed_shot_index")
         last_completed_date = status.get("last_completed_shot_date")
         last_completed_trig = status.get("last_completed_trigger_time") or status.get(
             "last_shot_trigger_time"
         )
+        missing_list = status.get("last_shot_missing") or []
 
-        manager_shot_date = None
-        manager_shot_index = None
-        manager_trigger_time = None
-
-        if (
-            pending_date is not None
-            and pending_index is not None
-            and shot_state not in (None, "idle")
-        ):
-            manager_shot_date = pending_date
-            manager_shot_index = pending_index
-            manager_trigger_time = pending_trigger
-        else:
-            manager_shot_date = last_completed_date
-            manager_shot_index = last_completed_idx
-            manager_trigger_time = last_completed_trig
-
-        manager_key = (
-            (manager_shot_date, manager_shot_index)
-            if manager_shot_date is not None and manager_shot_index is not None
+        completed_key = (
+            (last_completed_date, last_completed_idx)
+            if last_completed_date is not None and last_completed_idx is not None
             else None
         )
-        manual_key = self._current_manual_key()
 
-        if manager_key is not None and manager_key != manual_key:
-            self._write_manual_line_for_target(
-                self.manual_target_date,
-                self.manual_target_index,
-                self.manual_target_trigger_time,
+        if completed_key and completed_key != self.manual_last_completed_key:
+            self.manual_manager.on_shot_closed(
+                last_completed_date,
+                int(last_completed_idx),
+                last_completed_trig,
+                acquired_ok=not missing_list,
+                missing_cameras_list=missing_list,
             )
+            self.manual_last_completed_key = completed_key
 
-            self.manual_target_date = manager_shot_date
-            self.manual_target_index = manager_shot_index
-            self.manual_target_trigger_time = manager_trigger_time
-            self.manual_confirmed_values = (
-                self._get_confirmed_for_key(manager_key)
-                if manager_key
-                else self._build_empty_manual_values()
+        current_key = (
+            (current_date, current_index)
+            if current_date is not None and current_index is not None
+            else None
+        )
+        manager_current_key = (
+            self.manual_manager.current_date_str,
+            self.manual_manager.current_shot_index,
+        )
+
+        if shot_state == "acquiring" and current_key and current_key != manager_current_key:
+            self.manual_manager.on_shot_started(
+                current_date,
+                int(current_index),
+                current_trigger,
             )
-            self.manual_values_pending_for_current_shot = False
-        else:
-            if manager_key is not None and manager_trigger_time is not None:
-                self.manual_target_trigger_time = manager_trigger_time
+            self._clear_manual_param_entries()
 
-            if manual_key is not None:
-                self.manual_confirmed_values = self._get_confirmed_for_key(manual_key)
-            else:
-                self.manual_confirmed_values = self._build_empty_manual_values()
+        self.manual_target_date = self.manual_manager.current_date_str
+        self.manual_target_index = self.manual_manager.current_shot_index
+        self.manual_target_trigger_time = self.manual_manager.current_trigger_time_str
 
-        if self.manual_target_index is None:
-            self.manual_enabled = False
-            self.lbl_manual_target.configure(text="Manual parameters for: no shot yet")
-        else:
-            self.manual_enabled = True
-            self.lbl_manual_target.configure(
-                text=f"Manual parameters for: shot {self.manual_target_index}"
-            )
+        confirmed_list = list(self.manual_manager.current_confirmed_values)
+        names = self._manual_param_names()
+        self.manual_confirmed_values = {
+            name: confirmed_list[idx] if idx < len(confirmed_list) else ""
+            for idx, name in enumerate(names)
+        }
 
+        self.manual_enabled = self.manual_target_index is not None
         self._update_manual_confirm_state()
         self._update_manual_confirm_display()
 
-        self.manual_last_status_shot = manager_shot_index
-        self.manual_last_status_date = manager_shot_date
-        self.manual_last_status_state = shot_state
-
     def _flush_manual_params_on_stop(self):
-        key = self._current_manual_key()
-        if key is not None:
-            trigger = self.manual_target_trigger_time
-
-            if trigger is None and self.manager:
-                try:
-                    status = self.manager.get_status()
-                    if (
-                        status.get("last_completed_shot_date") == self.manual_target_date
-                        and status.get("last_completed_shot_index") == self.manual_target_index
-                    ):
-                        trigger = status.get("last_completed_trigger_time")
-                except Exception:
-                    pass
-
-            self._write_manual_line_for_target(
-                self.manual_target_date, self.manual_target_index, trigger
-            )
-
+        self.manual_manager.flush_pending_on_stop()
         self._reset_manual_state()
 
     def _after_config_changed(self):
@@ -1539,6 +1428,7 @@ class ShotManagerGUI:
         self.config.motor_positions_output = self._normalize_csv_path_str(
             self.var_motor_output.get().strip()
         ) or ""
+        self._sync_manual_manager()
         self._refresh_folder_labels()
         if self.manager:
             self.manager.update_config(self._build_runtime_config())
@@ -1632,6 +1522,7 @@ class ShotManagerGUI:
         if not self.config.expected_folders and self.config.folders:
             for folder in self.config.folders.values():
                 folder.expected = True
+        self._sync_manual_manager()
         self._rebuild_manual_param_fields()
         self._rebuild_manual_confirm_display()
         self._clear_manual_param_entries()
@@ -1663,6 +1554,14 @@ class ShotManagerGUI:
             self.txt_logs.see("end")
 
         self.root.after(200, self._poll_log_queue)
+
+    def _toggle_console_visibility(self):
+        if self.var_show_console.get():
+            if not self.txt_logs.winfo_ismapped():
+                self.txt_logs.pack(fill="both", expand=True, padx=5, pady=5)
+        else:
+            if self.txt_logs.winfo_ismapped():
+                self.txt_logs.pack_forget()
 
     def _append_log(self, text: str):
         self.txt_logs.configure(state="normal")
