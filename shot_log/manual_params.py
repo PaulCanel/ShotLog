@@ -143,6 +143,7 @@ class ManualParamsManager:
         self.pending_trigger_time_str: str | None = None
         self.pending_values: list[str] = []
         self.has_pending_row: bool = False
+        self.active_date_str: str | None = None
 
     # ---------------------------
     # Helpers
@@ -163,6 +164,9 @@ class ManualParamsManager:
     def _get_csv_path(self) -> Path | None:
         path = self._csv_path_provider()
         return path.with_suffix(".csv") if path else None
+
+    def set_active_date(self, active_date_str: str | None):
+        self.active_date_str = active_date_str
 
     def update_manual_params(self, manual_params: Sequence[ManualParam]):
         self.manual_params = list(manual_params)
@@ -222,6 +226,36 @@ class ManualParamsManager:
     # ---------------------------
     def _write_pending_row_to_csv(self):
         if not self.has_pending_row:
+            return
+
+        manual_shot_number = self.pending_shot_index
+        manual_shot_date = self.pending_date_str
+        active_date_str = self.active_date_str
+
+        if manual_shot_number is None:
+            self._log("[WARNING] Manual params pending row has no shot number; skipping write.")
+            self.has_pending_row = False
+            self.pending_values = []
+            self.pending_date_str = None
+            self.pending_shot_index = None
+            self.pending_trigger_time_str = None
+            return
+
+        if (
+            manual_shot_date is not None
+            and active_date_str is not None
+            and manual_shot_date != active_date_str
+        ):
+            self._log(
+                "[WARNING] Manual params pending row date %s does not match active date %s; skipping write.",
+                manual_shot_date,
+                active_date_str,
+            )
+            self.has_pending_row = False
+            self.pending_values = []
+            self.pending_date_str = None
+            self.pending_shot_index = None
+            self.pending_trigger_time_str = None
             return
 
         csv_path = self._get_csv_path()

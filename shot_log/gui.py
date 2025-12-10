@@ -292,7 +292,7 @@ class ShotManagerGUI:
         frm_manual_params.pack(fill="x", padx=5, pady=5)
         manual_header = ttk.Frame(frm_manual_params)
         manual_header.grid(row=0, column=0, sticky="we", padx=5, pady=(0, 5))
-        self.lbl_manual_target = ttk.Label(manual_header, text="Manual parameters for: no shot yet")
+        self.lbl_manual_target = ttk.Label(manual_header, text="Manual parameters: No shot waiting")
         self.lbl_manual_target.grid(row=0, column=0, sticky="w")
 
         self.manual_confirm_values_frame = ttk.Frame(frm_manual_params)
@@ -1262,7 +1262,7 @@ class ShotManagerGUI:
 
     def _update_manual_target_label(self):
         if self.manual_target_index is None:
-            text = "Manual parameters for: no shot yet"
+            text = "Manual parameters: No shot waiting"
         else:
             text = f"Manual parameters for: shot {self.manual_target_index}"
         self.lbl_manual_target.configure(text=text)
@@ -1292,7 +1292,7 @@ class ShotManagerGUI:
         self.manual_confirmed_values = self._build_empty_manual_values()
         self.manual_enabled = False
         self._update_manual_confirm_state()
-        self.lbl_manual_target.configure(text="Manual parameters for: no shot yet")
+        self.lbl_manual_target.configure(text="Manual parameters: No shot waiting")
         self._update_manual_confirm_display()
 
     def _on_manual_confirm_clicked(self):
@@ -1354,6 +1354,10 @@ class ShotManagerGUI:
 
     def _handle_manual_params_status(self, status: dict):
         status = status or {}
+        active_date_str = status.get("active_date_str")
+        if self.manual_manager:
+            self.manual_manager.set_active_date(active_date_str)
+
         shot_state = status.get("shot_state") or status.get("current_shot_state")
         current_date = status.get("current_shot_date")
         current_index = status.get("current_shot_index")

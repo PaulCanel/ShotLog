@@ -318,6 +318,8 @@ class ShotManager:
     # ---------------------------
 
     def _load_state(self):
+        today_str = datetime.now().strftime("%Y%m%d")
+
         if not self.state_file.exists():
             legacy_path = self.project_root / "eli50069_state.json"
             if legacy_path.exists() and legacy_path != self.state_file:
@@ -330,6 +332,7 @@ class ShotManager:
                 self._log(
                     "INFO", f"No previous state file found at {self.state_file}, starting fresh."
                 )
+                self.last_seen_date_str = today_str
                 return
         else:
             source_path = self.state_file
@@ -338,15 +341,40 @@ class ShotManager:
             with open(source_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
 
-            self.last_shot_index_by_date = state.get("last_shot_index_by_date", {})
-            trig_map = state.get("last_shot_trigger_time_by_date", {})
-            for k, v in trig_map.items():
+            loaded_last_seen = state.get("last_seen_date_str")
+            loaded_last_shot_index_by_date = state.get("last_shot_index_by_date", {})
+            loaded_trig_map = state.get("last_shot_trigger_time_by_date", {})
+            parsed_triggers: dict[str, datetime | None] = {}
+            for k, v in loaded_trig_map.items():
+                if v is None:
+                    parsed_triggers[k] = None
+                    continue
                 try:
-                    self.last_shot_trigger_time_by_date[k] = datetime.fromisoformat(v)
+                    parsed_triggers[k] = datetime.fromisoformat(v)
                 except Exception:
                     continue
+
             self.processed_files = state.get("processed_files", {})
             self.system_status = state.get("system_status", "IDLE")
+            self.manual_date_str = state.get("manual_date_str", self.manual_date_str)
+            self.last_seen_date_str = loaded_last_seen
+
+            if loaded_last_seen and loaded_last_seen != today_str:
+                self._log(
+                    "WARNING",
+                    f"[WARNING] Loaded state file belonged to another day ({loaded_last_seen}). "
+                    f"State has been safely reset for today ({today_str}).",
+                )
+                self.last_shot_index_by_date = {today_str: 0}
+                self.last_shot_trigger_time_by_date = {today_str: None}
+                self.processed_files = {}
+                self.system_status = "IDLE"
+                self.last_seen_date_str = today_str
+                self._save_state()
+                return
+
+            self.last_shot_index_by_date = loaded_last_shot_index_by_date
+            self.last_shot_trigger_time_by_date = parsed_triggers
             self._log("INFO", f"Loaded state from {source_path}")
         except Exception as e:
             self._log("ERROR", f"Failed to load state file: {e}")
@@ -355,7 +383,8 @@ class ShotManager:
         state = {
             "last_shot_index_by_date": self.last_shot_index_by_date,
             "last_shot_trigger_time_by_date": {
-                k: v.isoformat() for k, v in self.last_shot_trigger_time_by_date.items()
+                k: (v.isoformat() if isinstance(v, datetime) else None)
+                for k, v in self.last_shot_trigger_time_by_date.items()
             },
             "processed_files": self.processed_files,
             "system_status": self.system_status,
