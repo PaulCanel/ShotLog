@@ -1414,7 +1414,9 @@ class ShotManagerGUI:
         )
         manual_key = self._current_manual_key()
 
-        if manager_key is not None and manager_key != manual_key:
+        shot_changed = manager_key is not None and manager_key != manual_key
+
+        if shot_changed:
             self._write_manual_line_for_target(
                 self.manual_target_date,
                 self.manual_target_index,
@@ -1424,11 +1426,7 @@ class ShotManagerGUI:
             self.manual_target_date = manager_shot_date
             self.manual_target_index = manager_shot_index
             self.manual_target_trigger_time = manager_trigger_time
-            self.manual_confirmed_values = (
-                self._get_confirmed_for_key(manager_key)
-                if manager_key
-                else self._build_empty_manual_values()
-            )
+            self.manual_confirmed_values = self._build_empty_manual_values()
             self.manual_values_pending_for_current_shot = False
         else:
             if manager_key is not None and manager_trigger_time is not None:
