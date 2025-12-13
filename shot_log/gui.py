@@ -1402,7 +1402,6 @@ class ShotManagerGUI:
                 int(current_index),
                 current_trigger,
             )
-            self._clear_manual_param_entries()
 
         self.manual_target_date = self.manual_manager.current_date_str
         self.manual_target_index = self.manual_manager.current_shot_index
