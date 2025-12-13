@@ -250,11 +250,13 @@ class ShotLogReader:
 
     # ---------- Watchdog ----------
     def _refresh_watchers(self):
-        for sched in self.watch_schedules:
-            try:
-                self.observer.unschedule(sched)
-            except Exception:
-                pass
+        # Stop observer completely
+        if self.observer.is_alive():
+            self.observer.stop()
+            self.observer.join()
+
+        # Create a NEW observer
+        self.observer = Observer()
         self.watch_schedules = []
         self._handlers = []
 
@@ -266,8 +268,7 @@ class ShotLogReader:
             schedule = self.observer.schedule(watcher, path.parent, recursive=False)
             self.watch_schedules.append(schedule)
 
-        if not self.observer.is_alive():
-            self.observer.start()
+        self.observer.start()
 
     # ---------- Parsing ----------
     def _parse_all(self):
