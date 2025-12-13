@@ -6,7 +6,11 @@ from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from statistics import mean, median
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font
 from watchdog.events import FileSystemEventHandler
@@ -19,6 +23,31 @@ RED_BG = "#8B0000"  # DarkRed
 ORANGE_BG = "#FF8C00"  # DarkOrange
 TEXT_DEFAULT = "white"
 TEXT_WARNING = "#FFFF00"
+
+
+def to_argb(color: str) -> str:
+    """Convert a color string to ARGB format required by openpyxl.
+
+    Accepted inputs: "white", "#RRGGBB", "RRGGBB", "AARRGGBB".
+    Returns upper-case "AARRGGBB", defaulting to opaque white.
+    """
+
+    if not color:
+        return "FFFFFFFF"
+
+    normalized = color.strip()
+    if normalized.startswith("#"):
+        normalized = normalized[1:]
+
+    if normalized.lower() == "white":
+        normalized = "FFFFFF"
+
+    if len(normalized) == 8:
+        return normalized.upper()
+    if len(normalized) == 6:
+        return f"FF{normalized.upper()}"
+
+    return "FFFFFFFF"
 
 
 # ==========================
@@ -338,6 +367,170 @@ class TargetWatcher(FileSystemEventHandler):
 
 
 # ==========================
+# Plotting panel
+# ==========================
+
+
+class ColumnPlotPanel:
+    def __init__(self, parent: tk.Widget, color: str):
+        self.color = color
+        self.frame = ttk.Frame(parent)
+        self.frame.pack(fill="x", padx=5, pady=5)
+
+        self.grid_var = tk.BooleanVar(value=True)
+        self.bins_var = tk.IntVar(value=5)
+        self.mode = "plot"
+
+        controls = ttk.Frame(self.frame)
+        controls.pack(fill="x", pady=2)
+
+        ttk.Checkbutton(controls, text="Grid", variable=self.grid_var, command=self._toggle_grid).pack(
+            side="left", padx=5
+        )
+        self.toggle_btn = ttk.Button(controls, text="Histogram", command=self._toggle_mode)
+        self.toggle_btn.pack(side="left", padx=5)
+
+        ttk.Label(controls, text="Bins:").pack(side="left")
+        self.bins_spin = tk.Spinbox(
+            controls,
+            from_=1,
+            to=100,
+            width=5,
+            textvariable=self.bins_var,
+        )
+        self.bins_spin.pack(side="left", padx=5)
+
+        self.stats_label = ttk.Label(self.frame, text="Select a column to plot")
+        self.stats_label.pack(anchor="w", padx=5)
+
+        self.figure = Figure(figsize=(6, 3))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        self.current_x: list[int] = []
+        self.current_y: list[float | None] = []
+        self.is_time_data = False
+
+    def set_series(self, x_values: list[int], y_values: list[float | None], is_time: bool = False):
+        self.current_x = x_values
+        self.current_y = y_values
+        self.is_time_data = is_time
+        self.mode = "plot"
+        self._update_mode_label()
+        self._draw_plot()
+
+    def _toggle_grid(self):
+        self._draw_plot()
+
+    def _toggle_mode(self):
+        if not self.current_y:
+            self._show_no_data()
+            return
+        self.mode = "hist" if self.mode == "plot" else "plot"
+        self._update_mode_label()
+        self._draw_plot()
+
+    def _update_mode_label(self):
+        self.toggle_btn.configure(text="Plot" if self.mode == "hist" else "Histogram")
+
+    def _draw_plot(self):
+        if not self.current_y:
+            self._show_no_data()
+            return
+        valid_values = [v for v in self.current_y if v is not None]
+        if not valid_values:
+            self._show_no_data()
+            return
+        if self.mode == "hist":
+            self.plot_hist(valid_values, is_time=self.is_time_data)
+        else:
+            self.plot_series(self.current_x, self.current_y, is_time=self.is_time_data)
+
+    def plot_series(self, x_values: list[int], y_values: list[float | None], is_time: bool = False):
+        self.ax.clear()
+
+        points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+        if not points:
+            self._show_no_data()
+            return
+
+        xs, ys = zip(*points)
+        self.ax.scatter(xs, ys, color=self.color)
+
+        for (prev_x, prev_y), (cur_x, cur_y) in zip(points, points[1:]):
+            if prev_y is None or cur_y is None:
+                continue
+            style = "solid" if cur_x == prev_x + 1 else "dashed"
+            self.ax.plot([prev_x, cur_x], [prev_y, cur_y], linestyle=style, color=self.color)
+
+        if is_time:
+            self.ax.yaxis.set_major_formatter(FuncFormatter(lambda _, pos: self._format_seconds_label(_)))
+
+        self.ax.set_xlabel("Shot")
+        self.ax.grid(self.grid_var.get())
+        self.canvas.draw_idle()
+        self._update_stats([v for v in y_values if v is not None], is_time=is_time)
+
+    def plot_hist(self, values: list[float], is_time: bool = False):
+        self.ax.clear()
+        bins = self._safe_bins()
+        self.ax.hist(values, bins=bins, color=self.color, edgecolor="black")
+        self.ax.set_xlabel("Value")
+        self.ax.set_ylabel("Frequency")
+        if is_time:
+            self.ax.xaxis.set_major_formatter(FuncFormatter(lambda _, pos: self._format_seconds_label(_)))
+        self.ax.grid(self.grid_var.get())
+        self.canvas.draw_idle()
+        self._update_stats(values, is_time=is_time)
+
+    def _safe_bins(self) -> int:
+        try:
+            bins = int(self.bins_var.get())
+            return max(1, min(100, bins))
+        except Exception:
+            return 5
+
+    def _update_stats(self, values: list[float], is_time: bool):
+        if not values:
+            self.stats_label.configure(text="No numeric data")
+            return
+        min_v = min(values)
+        max_v = max(values)
+        mean_v = mean(values)
+        median_v = median(values)
+        if is_time:
+            formatter = self._format_seconds_label
+            txt = (
+                f"Min: {formatter(min_v)} | Max: {formatter(max_v)} | "
+                f"Mean: {formatter(mean_v)} | Median: {formatter(median_v)}"
+            )
+        else:
+            txt = (
+                f"Min: {min_v:.3f} | Max: {max_v:.3f} | "
+                f"Mean: {mean_v:.3f} | Median: {median_v:.3f}"
+            )
+        self.stats_label.configure(text=txt)
+
+    def _show_no_data(self):
+        self.ax.clear()
+        self.ax.text(0.5, 0.5, "No numeric data", ha="center", va="center")
+        self.ax.grid(self.grid_var.get())
+        self.canvas.draw_idle()
+        self.stats_label.configure(text="No numeric data")
+
+    @staticmethod
+    def _format_seconds_label(value):
+        try:
+            total_seconds = int(round(float(value)))
+        except Exception:
+            return "00:00:00"
+        h = total_seconds // 3600
+        m = (total_seconds % 3600) // 60
+        s = total_seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+# ==========================
 # Main GUI
 # ==========================
 
@@ -370,6 +563,9 @@ class ShotLogReader:
             "motor": [],
         }
 
+        self.manual_view_rows: list[ShotViewRow] = []
+        self.motor_view_rows: list[ShotViewRow] = []
+
         self._build_ui()
 
     # ---------- UI ----------
@@ -396,6 +592,9 @@ class ShotLogReader:
         self.notebook.add(log_frame, text="Logs")
         self.notebook.add(manual_frame, text="Manual Params")
         self.notebook.add(motor_frame, text="Motor Params")
+
+        self.manual_plot_panel = ColumnPlotPanel(manual_frame, color="blue")
+        self.motor_plot_panel = ColumnPlotPanel(motor_frame, color="red")
 
         frm_cam = ttk.LabelFrame(log_frame, text="Per-camera summary")
         frm_cam.pack(fill="x", padx=5, pady=5)
@@ -456,14 +655,21 @@ class ShotLogReader:
         self.tree_shot.tag_configure("missing", background="red", foreground=TEXT_DEFAULT)
 
         self.csv_trees: dict[str, ttk.Treeview] = {}
+        self.plot_panels: dict[str, ColumnPlotPanel] = {
+            "manual": self.manual_plot_panel,
+            "motor": self.motor_plot_panel,
+        }
         for key, frame in ("manual", manual_frame), ("motor", motor_frame):
-            tree = ttk.Treeview(frame, columns=[], show="headings")
+            tree_frame = ttk.Frame(frame)
+            tree_frame.pack(fill="both", expand=True)
+            tree = ttk.Treeview(tree_frame, columns=[], show="headings")
             tree.pack(fill="both", expand=True)
             tree.tag_configure("bg_green", background=GREEN_BG, foreground=TEXT_DEFAULT)
             tree.tag_configure("bg_blue", background=BLUE_BG, foreground=TEXT_DEFAULT)
             tree.tag_configure("bg_red", background=RED_BG, foreground=TEXT_DEFAULT)
             tree.tag_configure("bg_orange", background=ORANGE_BG, foreground=TEXT_DEFAULT)
             tree.tag_configure("fg_yellow", foreground=TEXT_WARNING)
+            tree.bind("<Button-1>", lambda e, src=key: self._on_csv_heading_click(src, e))
             self.csv_trees[key] = tree
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -561,6 +767,30 @@ class ShotLogReader:
             tree.heading(col, text=col)
             tree.column(col, width=140, anchor="center")
 
+    def _on_csv_heading_click(self, source: str, event):
+        tree = self.csv_trees.get(source)
+        if tree is None:
+            return
+        if tree.identify_region(event.x, event.y) != "heading":
+            return
+        column_id = tree.identify_column(event.x)
+        try:
+            col_index = int(column_id.lstrip("#")) - 1
+        except Exception:
+            return
+        header = self.manual_header if source == "manual" else self.motor_header
+        if col_index < 0 or col_index >= len(header):
+            return
+        normalized = self._normalize_header(header[col_index])
+        if normalized in {"shot", "shot_number", "shot_", "shot__", "index", "shot#"}:
+            return
+
+        rows = self.manual_view_rows if source == "manual" else self.motor_view_rows
+        x_vals, y_vals, is_time = self._collect_series(header, rows, col_index)
+        panel = self.plot_panels.get(source)
+        if panel:
+            panel.set_series(x_vals, y_vals, is_time=is_time)
+
     # ---------- Table rendering ----------
     def _refresh_views(self):
         self._refresh_global_summary()
@@ -580,6 +810,9 @@ class ShotLogReader:
             manual_rows = self._ensure_rows(manual_rows, all_keys, "manual", header=self.manual_header)
         if self.motor_header:
             motor_rows = self._ensure_rows(motor_rows, all_keys, "motor", header=self.motor_header)
+
+        self.manual_view_rows = manual_rows
+        self.motor_view_rows = motor_rows
 
         self._render_rows("manual", manual_rows, yellow_keys)
         self._render_rows("motor", motor_rows, yellow_keys)
@@ -814,6 +1047,48 @@ class ShotLogReader:
         except Exception:
             return None
 
+    @staticmethod
+    def _parse_float_or_none(value: str) -> float | None:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_time_to_seconds(value: str) -> float | None:
+        try:
+            t = datetime.strptime(value.strip(), "%H:%M:%S")
+            return float(t.hour * 3600 + t.minute * 60 + t.second)
+        except Exception:
+            return None
+
+    def _collect_series(self, header: list[str], rows: list[ShotViewRow], value_idx: int):
+        shot_idx = self._find_header_index(header, {"shot", "shot_number", "shot_", "shot__", "index", "shot#"})
+        normalized_value = self._normalize_header(header[value_idx]) if value_idx < len(header) else ""
+        is_time = normalized_value in {"trigger_time", "time", "trigger_time_"}
+
+        x_values: list[int] = []
+        y_values: list[float | None] = []
+        for row in rows:
+            shot_val = None
+            if shot_idx is not None and shot_idx < len(row.values):
+                shot_val = self._parse_int_or_none(row.values[shot_idx].strip())
+            if shot_val is None or shot_val < 0:
+                shot_val = row.key[0]
+            if shot_val is None or shot_val < 0:
+                continue
+
+            raw_value = row.values[value_idx] if value_idx < len(row.values) else ""
+            if is_time:
+                parsed_value = self._parse_time_to_seconds(raw_value) if raw_value else None
+            else:
+                parsed_value = self._parse_float_or_none(raw_value) if raw_value != "" else None
+
+            x_values.append(shot_val)
+            y_values.append(parsed_value)
+
+        return x_values, y_values, is_time
+
     def _render_rows(self, source: str, rows: list[ShotViewRow], yellow_keys: set[tuple[int, str]]):
         tree = self.csv_trees[source]
         tree.delete(*tree.get_children())
@@ -923,7 +1198,7 @@ class ShotLogReader:
             excel_row = ws_cam.max_row
             fill_color = GREEN_BG.lstrip("#") if missing == 0 else RED_BG.lstrip("#")
             fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
-            font = Font(color=TEXT_DEFAULT)
+            font = Font(color=to_argb(TEXT_DEFAULT))
             for cell in ws_cam[excel_row]:
                 cell.fill = fill
                 cell.font = font
@@ -955,7 +1230,7 @@ class ShotLogReader:
         fill_color = color_map.get(row.bg)
         fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid") if fill_color else None
         font_color = TEXT_WARNING.lstrip("#") if (row.key in yellow_keys or row.yellow_text) else TEXT_DEFAULT
-        font = Font(color=font_color)
+        font = Font(color=to_argb(font_color))
         for cell in ws[row_idx]:
             if fill:
                 cell.fill = fill
