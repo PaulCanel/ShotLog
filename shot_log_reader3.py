@@ -375,11 +375,11 @@ class ColumnPlotPanel:
     def __init__(self, parent: tk.Widget, color: str):
         self.color = color
         self.frame = ttk.Frame(parent)
-        self.frame.pack(fill="x", padx=5, pady=5)
 
         self.grid_var = tk.BooleanVar(value=True)
         self.bins_var = tk.IntVar(value=5)
         self.mode = "plot"
+        self.y_label = ""
 
         controls = ttk.Frame(self.frame)
         controls.pack(fill="x", pady=2)
@@ -412,10 +412,18 @@ class ColumnPlotPanel:
         self.current_y: list[float | None] = []
         self.is_time_data = False
 
-    def set_series(self, x_values: list[int], y_values: list[float | None], is_time: bool = False):
+    def set_series(
+        self,
+        x_values: list[int],
+        y_values: list[float | None],
+        *,
+        is_time: bool = False,
+        label: str | None = None,
+    ):
         self.current_x = x_values
         self.current_y = y_values
         self.is_time_data = is_time
+        self.y_label = label or ""
         self.mode = "plot"
         self._update_mode_label()
         self._draw_plot()
@@ -468,6 +476,7 @@ class ColumnPlotPanel:
             self.ax.yaxis.set_major_formatter(FuncFormatter(lambda _, pos: self._format_seconds_label(_)))
 
         self.ax.set_xlabel("Shot")
+        self.ax.set_ylabel(self.y_label or "Value")
         self.ax.grid(self.grid_var.get())
         self.canvas.draw_idle()
         self._update_stats([v for v in y_values if v is not None], is_time=is_time)
@@ -476,7 +485,7 @@ class ColumnPlotPanel:
         self.ax.clear()
         bins = self._safe_bins()
         self.ax.hist(values, bins=bins, color=self.color, edgecolor="black")
-        self.ax.set_xlabel("Value")
+        self.ax.set_xlabel(self.y_label or "Value")
         self.ax.set_ylabel("Frequency")
         if is_time:
             self.ax.xaxis.set_major_formatter(FuncFormatter(lambda _, pos: self._format_seconds_label(_)))
@@ -593,9 +602,6 @@ class ShotLogReader:
         self.notebook.add(manual_frame, text="Manual Params")
         self.notebook.add(motor_frame, text="Motor Params")
 
-        self.manual_plot_panel = ColumnPlotPanel(manual_frame, color="blue")
-        self.motor_plot_panel = ColumnPlotPanel(motor_frame, color="red")
-
         frm_cam = ttk.LabelFrame(log_frame, text="Per-camera summary")
         frm_cam.pack(fill="x", padx=5, pady=5)
         columns_cam = ("camera", "shots_used", "shots_missing")
@@ -655,13 +661,18 @@ class ShotLogReader:
         self.tree_shot.tag_configure("missing", background="red", foreground=TEXT_DEFAULT)
 
         self.csv_trees: dict[str, ttk.Treeview] = {}
-        self.plot_panels: dict[str, ColumnPlotPanel] = {
-            "manual": self.manual_plot_panel,
-            "motor": self.motor_plot_panel,
-        }
-        for key, frame in ("manual", manual_frame), ("motor", motor_frame):
-            tree_frame = ttk.Frame(frame)
-            tree_frame.pack(fill="both", expand=True)
+        self.plot_panels: dict[str, ColumnPlotPanel] = {}
+        for key, frame, color in (
+            ("manual", manual_frame, "blue"),
+            ("motor", motor_frame, "red"),
+        ):
+            pane = ttk.PanedWindow(frame, orient="vertical")
+            pane.pack(fill="both", expand=True, padx=5, pady=5)
+
+            plot_panel = ColumnPlotPanel(pane, color=color)
+            pane.add(plot_panel.frame, weight=1)
+
+            tree_frame = ttk.Frame(pane)
             tree = ttk.Treeview(tree_frame, columns=[], show="headings")
             tree.pack(fill="both", expand=True)
             tree.tag_configure("bg_green", background=GREEN_BG, foreground=TEXT_DEFAULT)
@@ -670,7 +681,15 @@ class ShotLogReader:
             tree.tag_configure("bg_orange", background=ORANGE_BG, foreground=TEXT_DEFAULT)
             tree.tag_configure("fg_yellow", foreground=TEXT_WARNING)
             tree.bind("<Button-1>", lambda e, src=key: self._on_csv_heading_click(src, e))
+
+            pane.add(tree_frame, weight=3)
+
             self.csv_trees[key] = tree
+            self.plot_panels[key] = plot_panel
+            if key == "manual":
+                self.manual_plot_panel = plot_panel
+            elif key == "motor":
+                self.motor_plot_panel = plot_panel
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -789,7 +808,7 @@ class ShotLogReader:
         x_vals, y_vals, is_time = self._collect_series(header, rows, col_index)
         panel = self.plot_panels.get(source)
         if panel:
-            panel.set_series(x_vals, y_vals, is_time=is_time)
+            panel.set_series(x_vals, y_vals, is_time=is_time, label=header[col_index])
 
     # ---------- Table rendering ----------
     def _refresh_views(self):
