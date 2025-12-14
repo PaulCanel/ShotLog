@@ -1,0 +1,126 @@
+2025-12-11 11:35:49,560 - INFO - Project root = C:\Users\E1\Desktop\ELI50069_nextcloud
+2025-12-11 11:35:49,561 - INFO - RAW root    = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_RAW_DATA
+2025-12-11 11:35:49,561 - INFO - CLEAN root  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA
+2025-12-11 11:35:49,562 - INFO - Log folder  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA\shot_logs
+2025-12-11 11:35:49,562 - INFO - State file  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA\shot_log_state.json
+2025-12-11 11:35:49,562 - INFO - Initial expected cameras: ['Lanex1', 'Lanex2', 'Lanex5', 'LanexGamma', 'Lyso', 'Csi', 'DarkShadow', 'TopView', 'FROG', 'Tracker', 'specular', 'NearField']
+2025-12-11 11:35:49,598 - INFO - Trigger cameras (from folder configs): ['Lanex2', 'Lanex5', 'LanexGamma', 'Lyso', 'Csi']
+2025-12-11 11:35:49,598 - INFO - Global keyword = '2025', apply_to_all = False
+2025-12-11 11:35:49,598 - INFO - Folder Csi – expected=True, trigger=True
+2025-12-11 11:35:49,598 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,598 - INFO - Folder DarkShadow – expected=True, trigger=False
+2025-12-11 11:35:49,598 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,599 - INFO - Folder FROG – expected=True, trigger=False
+2025-12-11 11:35:49,599 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,599 - INFO -   File spec 2: keyword='2025', ext='.fer'
+2025-12-11 11:35:49,599 - INFO - Folder Lanex1 – expected=True, trigger=False
+2025-12-11 11:35:49,599 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,599 - INFO - Folder Lanex2 – expected=True, trigger=True
+2025-12-11 11:35:49,599 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,600 - INFO - Folder Lanex3 – expected=False, trigger=False
+2025-12-11 11:35:49,600 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,600 - INFO - Folder Lanex4 – expected=False, trigger=False
+2025-12-11 11:35:49,600 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,601 - INFO - Folder Lanex5 – expected=True, trigger=True
+2025-12-11 11:35:49,602 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,602 - INFO - Folder LanexGamma – expected=True, trigger=True
+2025-12-11 11:35:49,603 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,603 - INFO - Folder Lyso – expected=True, trigger=True
+2025-12-11 11:35:49,605 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,605 - INFO - Folder NearField – expected=True, trigger=False
+2025-12-11 11:35:49,606 - INFO -   File spec 1: keyword='NF', ext='.png'
+2025-12-11 11:35:49,606 - INFO -   File spec 2: keyword='NF', ext='.tiff'
+2025-12-11 11:35:49,606 - INFO - Folder SideView – expected=False, trigger=False
+2025-12-11 11:35:49,609 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,609 - INFO - Folder TopView – expected=True, trigger=False
+2025-12-11 11:35:49,610 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,610 - INFO - Folder Tracker – expected=True, trigger=False
+2025-12-11 11:35:49,610 - INFO -   File spec 1: keyword='2025', ext='.root'
+2025-12-11 11:35:49,610 - INFO - Folder specular – expected=True, trigger=False
+2025-12-11 11:35:49,610 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,615 - INFO - Loaded state from C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA\shot_log_state.json
+2025-12-11 11:35:49,616 - INFO - Updated keyword settings: keyword='2025', apply_to_all=False
+2025-12-11 11:35:49,616 - INFO - Global keyword = '2025', apply_to_all = False
+2025-12-11 11:35:49,616 - INFO - Folder Csi – expected=True, trigger=True
+2025-12-11 11:35:49,616 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,616 - INFO - Folder DarkShadow – expected=True, trigger=False
+2025-12-11 11:35:49,617 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,617 - INFO - Folder FROG – expected=True, trigger=False
+2025-12-11 11:35:49,617 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,617 - INFO -   File spec 2: keyword='2025', ext='.fer'
+2025-12-11 11:35:49,617 - INFO - Folder Lanex1 – expected=True, trigger=False
+2025-12-11 11:35:49,617 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,617 - INFO - Folder Lanex2 – expected=True, trigger=True
+2025-12-11 11:35:49,617 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,617 - INFO - Folder Lanex3 – expected=False, trigger=False
+2025-12-11 11:35:49,617 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,618 - INFO - Folder Lanex4 – expected=False, trigger=False
+2025-12-11 11:35:49,618 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,618 - INFO - Folder Lanex5 – expected=True, trigger=True
+2025-12-11 11:35:49,618 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,618 - INFO - Folder LanexGamma – expected=True, trigger=True
+2025-12-11 11:35:49,618 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,618 - INFO - Folder Lyso – expected=True, trigger=True
+2025-12-11 11:35:49,618 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,618 - INFO - Folder NearField – expected=True, trigger=False
+2025-12-11 11:35:49,618 - INFO -   File spec 1: keyword='NF', ext='.png'
+2025-12-11 11:35:49,618 - INFO -   File spec 2: keyword='NF', ext='.tiff'
+2025-12-11 11:35:49,619 - INFO - Folder SideView – expected=False, trigger=False
+2025-12-11 11:35:49,619 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,620 - INFO - Folder TopView – expected=True, trigger=False
+2025-12-11 11:35:49,620 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,620 - INFO - Folder Tracker – expected=True, trigger=False
+2025-12-11 11:35:49,620 - INFO -   File spec 1: keyword='2025', ext='.root'
+2025-12-11 11:35:49,620 - INFO - Folder specular – expected=True, trigger=False
+2025-12-11 11:35:49,620 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,620 - INFO - Updated timing parameters: full_window=35.0s, timeout=65.0s
+2025-12-11 11:35:49,621 - INFO - Configuration updated for running manager. Expected cameras: ['Lanex1', 'Lanex2', 'Lanex5', 'LanexGamma', 'Lyso', 'Csi', 'DarkShadow', 'TopView', 'FROG', 'Tracker', 'specular', 'NearField']
+2025-12-11 11:35:49,621 - INFO - Trigger cameras (from folder configs): ['Lanex2', 'Lanex5', 'LanexGamma', 'Lyso', 'Csi']
+2025-12-11 11:35:49,621 - INFO - Project root = C:\Users\E1\Desktop\ELI50069_nextcloud
+2025-12-11 11:35:49,621 - INFO - RAW root    = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_RAW_DATA
+2025-12-11 11:35:49,622 - INFO - CLEAN root  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA
+2025-12-11 11:35:49,622 - INFO - Log folder  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA\shot_logs
+2025-12-11 11:35:49,622 - INFO - State file  = C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_CLEAN_DATA\shot_log_state.json
+2025-12-11 11:35:49,622 - INFO - Global keyword = '2025', apply_to_all = False
+2025-12-11 11:35:49,622 - INFO - Folder Csi – expected=True, trigger=True
+2025-12-11 11:35:49,622 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,622 - INFO - Folder DarkShadow – expected=True, trigger=False
+2025-12-11 11:35:49,622 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,622 - INFO - Folder FROG – expected=True, trigger=False
+2025-12-11 11:35:49,622 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,622 - INFO -   File spec 2: keyword='2025', ext='.fer'
+2025-12-11 11:35:49,623 - INFO - Folder Lanex1 – expected=True, trigger=False
+2025-12-11 11:35:49,623 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,623 - INFO - Folder Lanex2 – expected=True, trigger=True
+2025-12-11 11:35:49,623 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,623 - INFO - Folder Lanex3 – expected=False, trigger=False
+2025-12-11 11:35:49,623 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,624 - INFO - Folder Lanex4 – expected=False, trigger=False
+2025-12-11 11:35:49,624 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,624 - INFO - Folder Lanex5 – expected=True, trigger=True
+2025-12-11 11:35:49,624 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,624 - INFO - Folder LanexGamma – expected=True, trigger=True
+2025-12-11 11:35:49,624 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,624 - INFO - Folder Lyso – expected=True, trigger=True
+2025-12-11 11:35:49,624 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,625 - INFO - Folder NearField – expected=True, trigger=False
+2025-12-11 11:35:49,625 - INFO -   File spec 1: keyword='NF', ext='.png'
+2025-12-11 11:35:49,625 - INFO -   File spec 2: keyword='NF', ext='.tiff'
+2025-12-11 11:35:49,625 - INFO - Folder SideView – expected=False, trigger=False
+2025-12-11 11:35:49,625 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,625 - INFO - Folder TopView – expected=True, trigger=False
+2025-12-11 11:35:49,625 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,625 - INFO - Folder Tracker – expected=True, trigger=False
+2025-12-11 11:35:49,625 - INFO -   File spec 1: keyword='2025', ext='.root'
+2025-12-11 11:35:49,626 - INFO - Folder specular – expected=True, trigger=False
+2025-12-11 11:35:49,626 - INFO -   File spec 1: keyword='2025', ext='.tiff'
+2025-12-11 11:35:49,626 - INFO - Worker loop started.
+2025-12-11 11:35:49,627 - INFO - Using PollingObserver (cross-platform polling mode).
+2025-12-11 11:35:49,627 - INFO - Observer type: PollingObserver
+2025-12-11 11:35:49,627 - INFO - Watchdog path exists: C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_RAW_DATA
+2025-12-11 11:35:49,627 - INFO - Scheduling watchdog on path: C:\Users\E1\Desktop\ELI50069_nextcloud\ELI50069_RAW_DATA (recursive=True)
+2025-12-11 11:35:49,628 - INFO - Starting watchdog observer.
+2025-12-11 11:35:50,442 - INFO - Watchdog observer started on RAW root.
+2025-12-11 11:35:50,442 - INFO - ShotManager started.
+2025-12-11 11:36:06,653 - INFO - Worker loop terminated.
+2025-12-11 11:36:06,661 - INFO - ShotManager stopped.
