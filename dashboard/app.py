@@ -7,12 +7,11 @@ from datetime import datetime
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from dashboard import parsers
-from dashboard.data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
-from dashboard import views
-from dashboard.styling import BACKGROUND_DARK
-from dashboard.utils import ensure_exports_dir, export_to_excel, file_signature
-
+import parsers
+from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
+import views
+from styling import BACKGROUND_DARK
+from utils import ensure_exports_dir, export_to_excel, file_signature
 
 st.set_page_config(page_title="ShotLog Dashboard", layout="wide")
 st.markdown(

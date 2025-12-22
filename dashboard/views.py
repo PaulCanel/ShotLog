@@ -8,11 +8,10 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from dashboard.data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
-from dashboard.parsers import parse_time_to_seconds
-from dashboard.styling import ACCENT, WARN_COLOR, render_card
-from dashboard.utils import format_datetime, format_ratio, seconds_to_clock
-
+from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
+from parsers import parse_time_to_seconds
+from styling import ACCENT, WARN_COLOR, render_card
+from utils import format_datetime, format_ratio, seconds_to_clock
 
 def overview_tab(log_data: ParsedLog):
     gs = log_data.global_summary

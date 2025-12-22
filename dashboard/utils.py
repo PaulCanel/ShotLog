@@ -9,7 +9,7 @@ from typing import Iterable, List
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
-from dashboard.data_models import CombinedAlignment, DisplayRow, ParsedLog, ParsedManual, ParsedMotor
+from data_models import CombinedAlignment, DisplayRow, ParsedLog, ParsedManual, ParsedMotor
 
 GREEN_BG = "#006400"
 BLUE_BG = "#00008B"

@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Sequence, Set, Tuple
 
-from dashboard.data_models import (
+from data_models import (
     CameraSummary,
     CombinedAlignment,
     DisplayRow,
@@ -22,6 +22,7 @@ from dashboard.data_models import (
     ParsedMotor,
     ShotRecord,
 )
+
 
 GREEN_BG = "green"
 BLUE_BG = "blue"
