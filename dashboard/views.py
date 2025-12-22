@@ -36,7 +36,9 @@ def overview_tab(log_data: ParsedLog):
         st.plotly_chart(chart, use_container_width=True)
 
         st.markdown("### Latest shots")
-        only_missing = st.checkbox("Only shots with missing cameras", value=False)
+        only_missing = st.checkbox(
+            "Only shots with missing cameras", value=False, key="overview_only_missing"
+        )
         view_df = df.sort_values("shot_number", ascending=False)
         if only_missing:
             view_df = view_df[view_df["missing_count"] > 0]
@@ -95,7 +97,9 @@ def shots_tab(log_data: ParsedLog):
 
     all_cams = sorted({cam for cams in df["expected_cams"] for cam in cams})
     cam_filter = st.multiselect("Filter by camera", options=all_cams)
-    only_missing = st.checkbox("Only shots with missing cameras", value=False)
+    only_missing = st.checkbox(
+        "Only shots with missing cameras", value=False, key="shots_only_missing"
+    )
     max_shot = int(df["shot_number"].max()) if not df.empty else 0
     shot_range = st.slider("Shot index range", 0, max_shot, (0, max_shot)) if max_shot > 0 else (0, 0)
 
@@ -166,8 +170,10 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
         st.info("No numeric/time columns detected.")
         return
 
-    selected_col = st.selectbox("Column to inspect", options=numeric_columns)
-    bins = st.slider("Histogram bins", 5, 80, 20)
+    selected_col = st.selectbox(
+        "Column to inspect", options=numeric_columns, key=f"{title}_column_select"
+    )
+    bins = st.slider("Histogram bins", 5, 80, 20, key=f"{title}_bins_slider")
 
     series = df[selected_col].dropna()
     times = series.apply(parse_time_to_seconds)
