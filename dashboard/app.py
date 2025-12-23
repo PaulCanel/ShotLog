@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -140,6 +139,19 @@ def _input_sidebar():
             f.write(motor_upload.getbuffer())
         motor_path_effective = str(motor_dest)
 
+    if log_path_effective and str(log_path_effective).startswith(str(UPLOAD_DIR)):
+        st.sidebar.info(
+            "Live mode: uploaded log file is a static copy. For true live updates, use a path on disk."
+        )
+    if manual_path_effective and str(manual_path_effective).startswith(str(UPLOAD_DIR)):
+        st.sidebar.info(
+            "Live mode: uploaded manual CSV is a static copy. For true live updates, use a path on disk."
+        )
+    if motor_path_effective and str(motor_path_effective).startswith(str(UPLOAD_DIR)):
+        st.sidebar.info(
+            "Live mode: uploaded motor CSV is a static copy. For true live updates, use a path on disk."
+        )
+
     return (
         log_path_effective,
         manual_path_effective,
@@ -185,21 +197,22 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
 def main():
     ui_tick = st_autorefresh(interval=500, key="ui_tick")
 
-    if "last_parse_time" not in st.session_state:
-        st.session_state["last_parse_time"] = 0.0
     if "log_data" not in st.session_state:
         st.session_state["log_data"] = None
         st.session_state["manual_data"] = None
         st.session_state["motor_data"] = None
+    if "last_data_tick" not in st.session_state:
+        st.session_state["last_data_tick"] = None
 
     log_path, manual_path, motor_path, refresh, show_last_shot_banner = _input_sidebar()
+    refresh_ms = max(int(refresh * 1000), 1000)
+    data_tick = st_autorefresh(interval=refresh_ms, key="data_tick")
 
-    now_ts = time.time()
     force_reparse = st.session_state.pop("force_reparse", False)
     should_reparse = False
-
-    if force_reparse or (now_ts - st.session_state["last_parse_time"] >= refresh):
+    if data_tick != st.session_state["last_data_tick"] or force_reparse:
         should_reparse = True
+        st.session_state["last_data_tick"] = data_tick
 
     if should_reparse:
         log_data, manual_data, motor_data, errors = _load_sources(
@@ -210,7 +223,6 @@ def main():
         st.session_state["log_data"] = log_data
         st.session_state["manual_data"] = manual_data
         st.session_state["motor_data"] = motor_data
-        st.session_state["last_parse_time"] = now_ts
     else:
         log_data = st.session_state["log_data"]
         manual_data = st.session_state["manual_data"]
@@ -240,9 +252,9 @@ def main():
 
     if log_data and show_last_shot_banner:
         views.last_shot_banner(log_data, font_size=font_size)
-        header_offset = font_size + 80
+        base_offset_px = 140
     else:
-        header_offset = 0
+        base_offset_px = 0
 
     st.markdown(
         f"""
@@ -252,13 +264,14 @@ def main():
             overflow: hidden;
         }}
         .block-container {{
-            padding-top: 0.2rem;
+            padding-top: 0;
         }}
         .tab-scroll-container {{
             position: relative;
-            margin-top: {header_offset}px;
-            height: calc(100vh - {header_offset}px);
+            margin-top: {base_offset_px}px;
+            height: calc(100vh - {base_offset_px}px);
             overflow-y: auto;
+            background-color: {BACKGROUND_DARK};
         }}
         </style>
         """,

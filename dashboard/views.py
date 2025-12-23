@@ -126,6 +126,34 @@ def shots_tab(log_data: ParsedLog):
 
 
 def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
+    if "banner_css_loaded" not in st.session_state:
+        st.session_state["banner_css_loaded"] = True
+        st.markdown(
+            """
+            <style>
+            .last-shot-banner-wrapper {
+                position: fixed;
+                top: 3.25rem;
+                left: 0;
+                right: 0;
+                z-index: 999;
+            }
+            .last-shot-banner-box {
+                margin: 0;
+                padding: 0.5rem 1rem 0.25rem 1rem;
+                background-color: #ffffff;
+                border-bottom: 1px solid #ccc;
+                text-align: center;
+            }
+            .last-shot-main {
+                font-weight: bold;
+                transition: color 0.4s linear;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
     last_shot = None
     if log_data.shots:
         shots_with_time = [s for s in log_data.shots if s.trigger_time is not None]
@@ -153,40 +181,19 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
     text_color = color
     timer_color = "#000000"
 
-    st.markdown(
-        """
-        <style>
-        .last-shot-banner-wrapper {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 999;
-        }
-        .last-shot-banner-box {
-            margin: 0;
-            padding: 0.5rem 1rem;
-            background-color: #ffffff;
-            border-bottom: 1px solid #ccc;
-            text-align: center;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     if last_shot and last_shot.trigger_time:
         size_px = max(int(font_size), 16)
         st.markdown(
             f"""
             <div class="last-shot-banner-wrapper">
               <div class="last-shot-banner-box">
-                <div style="font-size: {size_px}px; font-weight: bold; color: {text_color};">
+                <div class="last-shot-main" style="font-size: {size_px}px; color: {text_color};">
                   Last shot: {last_shot.shot_number}
                 </div>
                 <div style="font-size: 18px; margin-top: 0.3rem; color: {timer_color};">
                   Time since last shot: {elapsed_text}
                 </div>
+                <div style="height: 4px; background-color: #ffffff;"></div>
               </div>
             </div>
             """,
