@@ -98,6 +98,21 @@ def _input_sidebar():
         "Show big last shot number", value=True, key="show_last_shot_banner"
     )
 
+    if "shot_font_size" not in st.session_state:
+        st.session_state["shot_font_size"] = 64
+
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("+", key="shot_font_plus"):
+            st.session_state["shot_font_size"] = min(
+                st.session_state["shot_font_size"] + 8, 200
+            )
+    with col2:
+        if st.button("-", key="shot_font_minus"):
+            st.session_state["shot_font_size"] = max(
+                st.session_state["shot_font_size"] - 8, 16
+            )
+
     UPLOAD_DIR.mkdir(exist_ok=True)
 
     log_path_effective = log_browse or log_path
@@ -207,6 +222,8 @@ def main():
         st.info("Provide at least a log file path to start.")
         return
 
+    font_size = st.session_state.get("shot_font_size", 64)
+
     if manual_data is None:
         manual_data = ParsedManual(header=[], rows=[])
     if motor_data is None:
@@ -214,9 +231,12 @@ def main():
 
     alignment = parsers.align_datasets(log_data, manual_data, motor_data)
 
+    if log_data and show_last_shot_banner:
+        views.last_shot_banner(log_data, font_size=font_size)
+
     tabs = st.tabs(["Overview", "Per Camera", "Shots", "Manual CSV", "Motor CSV", "Diagnostics / Export"])
     with tabs[0]:
-        views.overview_tab(log_data, show_last_shot_banner=show_last_shot_banner)
+        views.overview_tab(log_data)
     with tabs[1]:
         views.per_camera_tab(log_data)
     with tabs[2]:
