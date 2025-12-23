@@ -64,6 +64,11 @@ CAMERA_CONFIG = {
     "Lanex5": [{"keyword": "2025", "ext": ".tiff"}],
     "Csi":    [{"keyword": "2025", "ext": ".tiff"}],
     "Lyso":   [{"keyword": "2025", "ext": ".tiff"}],
+    "TopView":   [{"keyword": "2025", "ext": ".tiff"}],
+    "SideView":   [{"keyword": "2025", "ext": ".tiff"}],
+    "DarkShadow":   [{"keyword": "2025", "ext": ".tiff"}],
+    "LanexGamma":   [{"keyword": "2025", "ext": ".tiff"}],
+    "FROG":   [{"keyword": "2025", "ext": ".tiff"}, {"keyword": "2025", "ext": ".fer"}],
 }
 
 # Nom du fichier des positions initiales moteurs (optionnel)
@@ -112,7 +117,7 @@ class FakeShotSimulator:
 
         # Dictionnaire Axis -> position courante (pour les moteurs)
         self.motor_axes: dict[str, float] = {}
-        self.initial_csv_path = self.motor_root / INITIAL_MOTOR_FILE if self.motor_root else None
+        self.initial_csv_path = self.sim_root / INITIAL_MOTOR_FILE if self.motor_root else None
         self._ensure_dir(self.raw_root)
         self._ensure_dir(self.motor_root)
         self.load_initial_axes_from_csv()
