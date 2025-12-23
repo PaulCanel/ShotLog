@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import parsers
 from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
 import views
 from styling import BACKGROUND_DARK
-from utils import ensure_exports_dir, export_to_excel, file_signature
+from utils import ensure_exports_dir, export_to_excel
 
 UPLOAD_DIR = Path("uploads")
 
@@ -69,9 +70,6 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
 def _input_sidebar():
     st.sidebar.header("Inputs")
 
-    if "refresh_nonce" not in st.session_state:
-        st.session_state["refresh_nonce"] = 0
-
     st.sidebar.subheader("Log file")
     log_upload = st.sidebar.file_uploader(
         "Drop a log .txt file or browse", type=["txt", "log"], key="log_upload"
@@ -96,7 +94,7 @@ def _input_sidebar():
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
     force = st.sidebar.button("Force refresh", key="force_refresh")
     if force:
-        st.session_state["refresh_nonce"] += 1
+        st.session_state["force_reparse"] = True
 
     st.sidebar.markdown("### Display options")
     show_last_shot_banner = st.sidebar.checkbox(
@@ -148,19 +146,10 @@ def _input_sidebar():
         motor_path_effective,
         refresh,
         show_last_shot_banner,
-        st.session_state["refresh_nonce"],
     )
 
 
-def _load_sources(
-    log_path: str,
-    manual_path: str,
-    motor_path: str,
-    log_sig: tuple[str, float] | None,
-    manual_sig: tuple[str, float] | None,
-    motor_sig: tuple[str, float] | None,
-    nonce: int,
-):
+def _load_sources(log_path: str, manual_path: str, motor_path: str):
     errors: list[str] = []
     log_data: ParsedLog | None = None
     manual_data: ParsedManual | None = None
@@ -168,28 +157,25 @@ def _load_sources(
 
     try:
         if log_path:
-            if log_sig:
-                log_data = parsers.load_log(log_path, (log_sig, nonce))
-            else:
-                errors.append(f"Log file not found: {log_path}")
+            log_data = parsers.load_log(log_path)
+        else:
+            errors.append("Log file path is empty.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Log parse error: {exc}")
 
     try:
         if manual_path and log_data:
-            if manual_sig:
-                manual_data = parsers.load_manual_csv(manual_path, (manual_sig, nonce), log_data)
-            else:
-                errors.append(f"Manual CSV not found: {manual_path}")
+            manual_data = parsers.load_manual_csv(manual_path, log_data)
+        elif manual_path and not log_data:
+            errors.append("Manual CSV provided but log failed to parse.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Manual parse error: {exc}")
 
     try:
         if motor_path and log_data:
-            if motor_sig:
-                motor_data = parsers.load_motor_csv(motor_path, (motor_sig, nonce), log_data)
-            else:
-                errors.append(f"Motor CSV not found: {motor_path}")
+            motor_data = parsers.load_motor_csv(motor_path, log_data)
+        elif motor_path and not log_data:
+            errors.append("Motor CSV provided but log failed to parse.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Motor parse error: {exc}")
 
@@ -197,28 +183,39 @@ def _load_sources(
 
 
 def main():
-    st.markdown(
-        """
-        <style>
-        .block-container {
-            padding-top: 0.5rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
     ui_tick = st_autorefresh(interval=500, key="ui_tick")
 
-    log_path, manual_path, motor_path, refresh, show_last_shot_banner, refresh_nonce = _input_sidebar()
-    st_autorefresh(interval=refresh * 1000, key="autorefresh")
+    if "last_parse_time" not in st.session_state:
+        st.session_state["last_parse_time"] = 0.0
+    if "log_data" not in st.session_state:
+        st.session_state["log_data"] = None
+        st.session_state["manual_data"] = None
+        st.session_state["motor_data"] = None
 
-    log_sig = file_signature(log_path) if log_path else None
-    manual_sig = file_signature(manual_path) if manual_path else None
-    motor_sig = file_signature(motor_path) if motor_path else None
+    log_path, manual_path, motor_path, refresh, show_last_shot_banner = _input_sidebar()
 
-    log_data, manual_data, motor_data, errors = _load_sources(
-        log_path, manual_path, motor_path, log_sig, manual_sig, motor_sig, refresh_nonce
-    )
+    now_ts = time.time()
+    force_reparse = st.session_state.pop("force_reparse", False)
+    should_reparse = False
+
+    if force_reparse or (now_ts - st.session_state["last_parse_time"] >= refresh):
+        should_reparse = True
+
+    if should_reparse:
+        log_data, manual_data, motor_data, errors = _load_sources(
+            log_path,
+            manual_path,
+            motor_path,
+        )
+        st.session_state["log_data"] = log_data
+        st.session_state["manual_data"] = manual_data
+        st.session_state["motor_data"] = motor_data
+        st.session_state["last_parse_time"] = now_ts
+    else:
+        log_data = st.session_state["log_data"]
+        manual_data = st.session_state["manual_data"]
+        motor_data = st.session_state["motor_data"]
+        errors = []
 
     status_placeholder = st.sidebar.empty()
     if errors:
@@ -243,14 +240,26 @@ def main():
 
     if log_data and show_last_shot_banner:
         views.last_shot_banner(log_data, font_size=font_size)
+        header_offset = font_size + 80
+    else:
+        header_offset = 0
 
     st.markdown(
-        """
+        f"""
         <style>
-        .tab-scroll-container {
-            max-height: calc(100vh - 130px);
+        html, body {{
+            height: 100%;
+            overflow: hidden;
+        }}
+        .block-container {{
+            padding-top: 0.2rem;
+        }}
+        .tab-scroll-container {{
+            position: relative;
+            margin-top: {header_offset}px;
+            height: calc(100vh - {header_offset}px);
             overflow-y: auto;
-        }
+        }}
         </style>
         """,
         unsafe_allow_html=True,

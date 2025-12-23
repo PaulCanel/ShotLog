@@ -157,8 +157,10 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
         """
         <style>
         .last-shot-banner-wrapper {
-            position: sticky;
+            position: fixed;
             top: 0;
+            left: 0;
+            right: 0;
             z-index: 999;
         }
         .last-shot-banner-box {

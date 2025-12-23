@@ -4,15 +4,12 @@ This module exposes pure functions that transform the legacy parsing
 logic into reusable building blocks for the Streamlit dashboard.
 """
 from __future__ import annotations
-
 import csv
 import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Sequence, Set, Tuple
-
-import streamlit as st
 
 from data_models import (
     CameraSummary,
@@ -93,18 +90,15 @@ def align_datasets(log_data: ParsedLog, manual: ParsedManual, motor: ParsedMotor
     )
 
 
-@st.cache_data(show_spinner=False)
-def load_log(log_path: str, signature: object) -> ParsedLog:
+def load_log(log_path: str) -> ParsedLog:
     return parse_log_file(log_path)
 
 
-@st.cache_data(show_spinner=False)
-def load_manual_csv(manual_path: str, signature: object, log_data: ParsedLog | None = None) -> ParsedManual:
+def load_manual_csv(manual_path: str, log_data: ParsedLog | None = None) -> ParsedManual:
     return parse_manual_csv(manual_path, log_data)
 
 
-@st.cache_data(show_spinner=False)
-def load_motor_csv(motor_path: str, signature: object, log_data: ParsedLog | None = None) -> ParsedMotor:
+def load_motor_csv(motor_path: str, log_data: ParsedLog | None = None) -> ParsedMotor:
     return parse_motor_csv(motor_path, log_data)
 
 
