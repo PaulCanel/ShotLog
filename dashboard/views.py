@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
@@ -175,40 +176,131 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
     )
     bins = st.slider("Histogram bins", 5, 80, 20, key=f"{title}_bins_slider")
 
-    series = df[selected_col].dropna()
+    if "shot" in df.columns:
+        shot_col = "shot"
+    elif "shot_number" in df.columns:
+        shot_col = "shot_number"
+    else:
+        shot_col = None
+
+    if shot_col:
+        numeric_df = df[[shot_col, selected_col]].copy()
+    else:
+        numeric_df = df[[selected_col]].copy()
+        numeric_df["shot_index"] = range(len(numeric_df))
+        shot_col = "shot_index"
+
+    numeric_df = numeric_df.dropna(subset=[shot_col])
+    numeric_df[shot_col] = pd.to_numeric(numeric_df[shot_col], errors="coerce")
+    numeric_df = numeric_df.dropna(subset=[shot_col])
+    numeric_df[shot_col] = numeric_df[shot_col].astype(int)
+
+    series = numeric_df[selected_col].astype(str)
     times = series.apply(parse_time_to_seconds)
     is_time = times.notnull().all()
-    values = times if is_time else pd.to_numeric(series, errors="coerce").dropna()
 
-    st.plotly_chart(px.line(values, title=f"{selected_col} - line"), use_container_width=True)
-    st.plotly_chart(px.histogram(values, nbins=bins, title=f"{selected_col} - histogram"), use_container_width=True)
+    if is_time:
+        numeric_df["value"] = times
+    else:
+        numeric_df["value"] = pd.to_numeric(series, errors="coerce")
 
+    numeric_df = numeric_df.dropna(subset=["value"])
+    numeric_df = numeric_df.sort_values(shot_col)
+
+    if numeric_df.empty:
+        st.info("No valid data to plot for this column.")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=numeric_df[shot_col],
+            y=numeric_df["value"],
+            mode="markers",
+            name=selected_col,
+        )
+    )
+
+    shots = numeric_df[shot_col].tolist()
+    vals = numeric_df["value"].tolist()
+    solid_x, solid_y = [], []
+    gap_x, gap_y = [], []
+
+    for i in range(len(shots) - 1):
+        x0, x1 = shots[i], shots[i + 1]
+        y0, y1 = vals[i], vals[i + 1]
+        if x1 == x0 + 1:
+            solid_x += [x0, x1, None]
+            solid_y += [y0, y1, None]
+        elif x1 > x0 + 1:
+            gap_x += [x0, x1, None]
+            gap_y += [y0, y1, None]
+
+    if solid_x:
+        fig.add_trace(
+            go.Scatter(
+                x=solid_x,
+                y=solid_y,
+                mode="lines",
+                line=dict(dash="solid"),
+                showlegend=False,
+            )
+        )
+
+    if gap_x:
+        fig.add_trace(
+            go.Scatter(
+                x=gap_x,
+                y=gap_y,
+                mode="lines",
+                line=dict(dash="dash"),
+                showlegend=False,
+            )
+        )
+
+    fig.update_layout(
+        title=f"{selected_col} vs shot",
+        xaxis_title="Shot number",
+        yaxis_title=selected_col,
+        template="plotly_dark",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(
+        px.histogram(numeric_df, x="value", nbins=bins, title=f"{selected_col} - histogram"),
+        use_container_width=True,
+    )
+
+    stats_series = numeric_df["value"]
     st.write(
         {
-            "min": seconds_to_clock(values.min()) if is_time else float(values.min()),
-            "max": seconds_to_clock(values.max()) if is_time else float(values.max()),
-            "mean": seconds_to_clock(values.mean()) if is_time else float(values.mean()),
-            "median": seconds_to_clock(values.median()) if is_time else float(values.median()),
+            "min": seconds_to_clock(stats_series.min()) if is_time else float(stats_series.min()),
+            "max": seconds_to_clock(stats_series.max()) if is_time else float(stats_series.max()),
+            "mean": seconds_to_clock(stats_series.mean()) if is_time else float(stats_series.mean()),
+            "median": seconds_to_clock(stats_series.median()) if is_time else float(stats_series.median()),
         }
     )
 
 
 def _infer_numeric_columns(df: pd.DataFrame) -> List[str]:
-    numeric_cols = []
+    numeric_cols: List[str] = []
     for col in df.columns:
-        if col.strip() == "":
+        name = str(col).strip()
+        if not name:
             continue
-        sample = df[col].dropna().astype(str).head(10)
+
+        sample = df[col].dropna().astype(str).head(50)
         if sample.empty:
             continue
+
         if sample.apply(lambda v: parse_time_to_seconds(v) is not None).all():
             numeric_cols.append(col)
             continue
-        try:
-            sample.astype(float)
+
+        numeric = pd.to_numeric(sample, errors="coerce")
+        if numeric.notna().any():
             numeric_cols.append(col)
-        except ValueError:
-            continue
+
     return numeric_cols
 
 
