@@ -93,6 +93,11 @@ def _input_sidebar():
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
     force = st.sidebar.button("Force refresh", key="force_refresh")
 
+    st.sidebar.markdown("### Display options")
+    show_last_shot_banner = st.sidebar.checkbox(
+        "Show big last shot number", value=True, key="show_last_shot_banner"
+    )
+
     UPLOAD_DIR.mkdir(exist_ok=True)
 
     log_path_effective = log_browse or log_path
@@ -117,7 +122,14 @@ def _input_sidebar():
             f.write(motor_upload.getbuffer())
         motor_path_effective = str(motor_dest)
 
-    return log_path_effective, manual_path_effective, motor_path_effective, refresh, force
+    return (
+        log_path_effective,
+        manual_path_effective,
+        motor_path_effective,
+        refresh,
+        force,
+        show_last_shot_banner,
+    )
 
 
 def _load_sources(log_path: str, manual_path: str, motor_path: str):
@@ -176,7 +188,7 @@ def _cached_motor_parse(path: str, signature: tuple[str, float]):
 
 
 def main():
-    log_path, manual_path, motor_path, refresh, force = _input_sidebar()
+    log_path, manual_path, motor_path, refresh, force, show_last_shot_banner = _input_sidebar()
     st_autorefresh(interval=refresh * 1000, key="autorefresh")
     if force:
         st.cache_data.clear()
@@ -204,7 +216,7 @@ def main():
 
     tabs = st.tabs(["Overview", "Per Camera", "Shots", "Manual CSV", "Motor CSV", "Diagnostics / Export"])
     with tabs[0]:
-        views.overview_tab(log_data)
+        views.overview_tab(log_data, show_last_shot_banner=show_last_shot_banner)
     with tabs[1]:
         views.per_camera_tab(log_data)
     with tabs[2]:
