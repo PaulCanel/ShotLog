@@ -16,16 +16,6 @@ from utils import ensure_exports_dir, export_to_excel
 
 UPLOAD_DIR = Path("uploads")
 
-st.set_page_config(page_title="ShotLog Dashboard", layout="wide")
-st.markdown(
-    f"""
-    <style>
-    body {{ background-color: {BACKGROUND_DARK}; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key: str):
     if "browser_root" not in st.session_state:
@@ -73,21 +63,27 @@ def _input_sidebar():
     log_upload = st.sidebar.file_uploader(
         "Drop a log .txt file or browse", type=["txt", "log"], key="log_upload"
     )
-    log_path = st.sidebar.text_input("Log file path", value="", key="log_path")
+    log_path = st.sidebar.text_input(
+        "Log file path", value=st.session_state.get("log_path", ""), key="log_path"
+    )
     log_browse = _file_browser("Browse log file", [".txt", ".log"], "log", "log_path")
 
     st.sidebar.subheader("Manual CSV")
     manual_upload = st.sidebar.file_uploader(
         "Drop a manual CSV file or browse", type=["csv"], key="manual_upload"
     )
-    manual_path = st.sidebar.text_input("Manual CSV path", value="", key="manual_path")
+    manual_path = st.sidebar.text_input(
+        "Manual CSV path", value=st.session_state.get("manual_path", ""), key="manual_path"
+    )
     manual_browse = _file_browser("Browse manual CSV", [".csv"], "manual", "manual_path")
 
     st.sidebar.subheader("Motor CSV")
     motor_upload = st.sidebar.file_uploader(
         "Drop a motor CSV file or browse", type=["csv"], key="motor_upload"
     )
-    motor_path = st.sidebar.text_input("Motor CSV path", value="", key="motor_path")
+    motor_path = st.sidebar.text_input(
+        "Motor CSV path", value=st.session_state.get("motor_path", ""), key="motor_path"
+    )
     motor_browse = _file_browser("Browse motor CSV", [".csv"], "motor", "motor_path")
 
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
@@ -117,27 +113,30 @@ def _input_sidebar():
 
     UPLOAD_DIR.mkdir(exist_ok=True)
 
-    log_path_effective = log_browse or log_path
-    manual_path_effective = manual_browse or manual_path
-    motor_path_effective = motor_browse or motor_path
+    log_path_effective = (log_browse or log_path).strip() or None
+    manual_path_effective = (manual_browse or manual_path).strip() or None
+    motor_path_effective = (motor_browse or motor_path).strip() or None
 
     if log_upload is not None:
         log_dest = UPLOAD_DIR / log_upload.name
         with open(log_dest, "wb") as f:
             f.write(log_upload.getbuffer())
         log_path_effective = str(log_dest)
+        st.session_state["log_path"] = log_path_effective
 
     if manual_upload is not None:
         manual_dest = UPLOAD_DIR / manual_upload.name
         with open(manual_dest, "wb") as f:
             f.write(manual_upload.getbuffer())
         manual_path_effective = str(manual_dest)
+        st.session_state["manual_path"] = manual_path_effective
 
     if motor_upload is not None:
         motor_dest = UPLOAD_DIR / motor_upload.name
         with open(motor_dest, "wb") as f:
             f.write(motor_upload.getbuffer())
         motor_path_effective = str(motor_dest)
+        st.session_state["motor_path"] = motor_path_effective
 
     if log_path_effective and str(log_path_effective).startswith(str(UPLOAD_DIR)):
         st.sidebar.info(
@@ -161,7 +160,7 @@ def _input_sidebar():
     )
 
 
-def _load_sources(log_path: str, manual_path: str, motor_path: str):
+def _load_sources(log_path: str | None, manual_path: str | None, motor_path: str | None):
     errors: list[str] = []
     log_data: ParsedLog | None = None
     manual_data: ParsedManual | None = None
@@ -195,6 +194,29 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
 
 
 def main():
+    st.set_page_config(page_title="ShotLog Dashboard", layout="wide")
+    st.markdown(
+        """
+        <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        [data-testid="stAppViewContainer"] {
+            height: 100vh;
+            overflow: hidden;
+        }
+        .block-container {
+            padding-top: 0;
+            padding-bottom: 0;
+            height: 100%;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     ui_tick = st_autorefresh(interval=500, key="ui_tick")
 
     if "log_data" not in st.session_state:
@@ -252,25 +274,21 @@ def main():
 
     if log_data and show_last_shot_banner:
         views.last_shot_banner(log_data, font_size=font_size)
-        base_offset_px = 140
+        banner_offset = 140
     else:
-        base_offset_px = 0
+        banner_offset = 0
 
     st.markdown(
         f"""
         <style>
-        html, body {{
-            height: 100%;
-            overflow: hidden;
-        }}
-        .block-container {{
-            padding-top: 0;
-        }}
         .tab-scroll-container {{
-            position: relative;
-            margin-top: {base_offset_px}px;
-            height: calc(100vh - {base_offset_px}px);
+            position: absolute;
+            top: {banner_offset}px;
+            left: 0;
+            right: 0;
+            bottom: 0;
             overflow-y: auto;
+            overflow-x: hidden;
             background-color: {BACKGROUND_DARK};
         }}
         </style>
@@ -308,9 +326,9 @@ def main():
 
 
 def _diagnostics_tab(
-    log_path: str,
-    manual_path: str,
-    motor_path: str,
+    log_path: str | None,
+    manual_path: str | None,
+    motor_path: str | None,
     alignment: CombinedAlignment,
     log_data: ParsedLog,
     manual_data: ParsedManual,
