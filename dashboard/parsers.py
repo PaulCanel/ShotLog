@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Sequence, Set, Tuple
 
+import streamlit as st
+
 from data_models import (
     CameraSummary,
     CombinedAlignment,
@@ -51,7 +53,7 @@ def parse_log_file(path: str) -> ParsedLog:
     )
 
 
-def parse_manual_csv(path: str, log_data: ParsedLog) -> ParsedManual:
+def parse_manual_csv(path: str, log_data: ParsedLog | None = None) -> ParsedManual:
     """Parse the Manual CSV while keeping the same classification rules."""
 
     header, rows = _parse_csv(Path(path))
@@ -59,7 +61,7 @@ def parse_manual_csv(path: str, log_data: ParsedLog) -> ParsedManual:
     return ParsedManual(header=header, rows=display_rows)
 
 
-def parse_motor_csv(path: str, log_data: ParsedLog) -> ParsedMotor:
+def parse_motor_csv(path: str, log_data: ParsedLog | None = None) -> ParsedMotor:
     """Parse the Motor CSV while keeping the same classification rules."""
 
     header, rows = _parse_csv(Path(path))
@@ -89,6 +91,21 @@ def align_datasets(log_data: ParsedLog, manual: ParsedManual, motor: ParsedMotor
         motor_rows=motor_rows,
         yellow_keys=yellow_keys,
     )
+
+
+@st.cache_data(show_spinner=False)
+def load_log(log_path: str, signature: object) -> ParsedLog:
+    return parse_log_file(log_path)
+
+
+@st.cache_data(show_spinner=False)
+def load_manual_csv(manual_path: str, signature: object, log_data: ParsedLog | None = None) -> ParsedManual:
+    return parse_manual_csv(manual_path, log_data)
+
+
+@st.cache_data(show_spinner=False)
+def load_motor_csv(motor_path: str, signature: object, log_data: ParsedLog | None = None) -> ParsedMotor:
+    return parse_motor_csv(motor_path, log_data)
 
 
 # ---------------------------------------------------------------------------
