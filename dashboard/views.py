@@ -17,7 +17,7 @@ from styling import ACCENT, WARN_COLOR, render_card
 from utils import format_datetime, format_ratio, seconds_to_clock
 
 
-def overview_tab(log_data: ParsedLog, show_last_shot_banner: bool = False):
+def overview_tab(log_data: ParsedLog):
     gs = log_data.global_summary
     cam_missing = sum(1 for c in log_data.per_camera_summary if c.shots_missing > 0)
     cols = st.columns(6)
@@ -32,42 +32,12 @@ def overview_tab(log_data: ParsedLog, show_last_shot_banner: bool = False):
     for col, (label, value) in zip(cols, kpis):
         col.markdown(render_card(label, value, color=ACCENT), unsafe_allow_html=True)
 
-    last_shot = None
-    if log_data.shots:
-        shots_with_time = [s for s in log_data.shots if s.trigger_time is not None]
-        if shots_with_time:
-            last_shot = max(shots_with_time, key=lambda s: s.trigger_time)
-
-    elapsed_text = "N/A"
-    bg_color = "#ffffff"
-    text_color = "#000000"
-
-    if last_shot and last_shot.trigger_time:
-        now = datetime.now()
-        delta = now - last_shot.trigger_time
-        seconds = delta.total_seconds()
-
-        if seconds < 0:
-            elapsed_text = "0 s"
-        elif seconds > 10 * 3600:
-            elapsed_text = "> 10 h"
-        else:
-            minutes = int(seconds // 60)
-            secs = int(seconds % 60)
-            if minutes > 0:
-                elapsed_text = f"{minutes} min {secs} s"
-            else:
-                elapsed_text = f"{secs} s"
-
-        color = _jet_color_for_elapsed(seconds)
-        text_color = color
-
     st.markdown("### Missing cameras over time")
     df = _build_shot_df(log_data)
     if not df.empty:
         chart = px.line(df, x="shot_number", y="missing_count", markers=True, color_discrete_sequence=[ACCENT])
         chart.update_layout(template="plotly_dark", height=360)
-        st.plotly_chart(chart, use_container_width=True)
+        st.plotly_chart(chart, width="stretch")
 
         st.markdown("### Latest shots")
         only_missing = st.checkbox(
@@ -85,29 +55,6 @@ def overview_tab(log_data: ParsedLog, show_last_shot_banner: bool = False):
         )
     else:
         st.info("No shots parsed yet.")
-
-    if show_last_shot_banner and last_shot and last_shot.trigger_time:
-        shot_num = last_shot.shot_number
-        st.markdown(
-            f"""
-            <div style="
-                margin-top: 1rem;
-                padding: 1.5rem;
-                text-align: center;
-                background-color: {bg_color};
-                border-radius: 16px;
-                border: 2px solid #444;
-            ">
-                <div style="font-size: 4rem; font-weight: bold; color: {text_color};">
-                    Last shot: {shot_num}
-                </div>
-                <div style="font-size: 1.2rem; margin-top: 0.5rem; color: #dddddd;">
-                    Time since last shot: {elapsed_text}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
 
 def per_camera_tab(log_data: ParsedLog):
@@ -142,7 +89,7 @@ def per_camera_tab(log_data: ParsedLog):
         color_discrete_sequence=[WARN_COLOR],
     )
     fig.update_layout(template="plotly_dark", height=420, xaxis_title="% missing")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def shots_tab(log_data: ParsedLog):
@@ -176,6 +123,74 @@ def shots_tab(log_data: ParsedLog):
     display_df = filtered.drop(columns=["expected_cams_list"], errors="ignore")
     styled = display_df.style.apply(_style_shot_row, axis=1)
     st.dataframe(styled, use_container_width=True, height=500)
+
+
+def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
+    last_shot = None
+    if log_data.shots:
+        shots_with_time = [s for s in log_data.shots if s.trigger_time is not None]
+        if shots_with_time:
+            last_shot = max(shots_with_time, key=lambda s: s.trigger_time)
+
+    elapsed_text = "N/A"
+    seconds = 0.0
+    if last_shot and last_shot.trigger_time:
+        now = datetime.now()
+        delta = now - last_shot.trigger_time
+        seconds = max(delta.total_seconds(), 0.0)
+
+        if seconds > 10 * 3600:
+            elapsed_text = "> 10 h"
+        else:
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            if minutes > 0:
+                elapsed_text = f"{minutes} min {secs} s"
+            else:
+                elapsed_text = f"{secs} s"
+
+    color = _jet_color_for_elapsed(seconds)
+    bg_color = "#ffffff"
+    text_color = color
+    timer_color = "#000000"
+
+    st.markdown(
+        """
+        <style>
+        .last-shot-banner {
+            position: sticky;
+            top: 0;
+            z-index: 999;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if last_shot and last_shot.trigger_time:
+        size_px = max(int(font_size), 16)
+        st.markdown(
+            f"""
+            <div class="last-shot-banner">
+              <div style="
+                  margin-top: 0;
+                  margin-bottom: 0.5rem;
+                  padding: 1rem;
+                  text-align: center;
+                  background-color: {bg_color};
+                  border-bottom: 1px solid #ccc;
+              ">
+                <div style="font-size: {size_px}px; font-weight: bold; color: {text_color};">
+                  Last shot: {last_shot.shot_number}
+                </div>
+                <div style="font-size: 18px; margin-top: 0.3rem; color: {timer_color};">
+                  Time since last shot: {elapsed_text}
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def manual_tab(manual: ParsedManual, alignment: CombinedAlignment):
@@ -243,7 +258,10 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
         shot_col = None
 
     if shot_col:
-        numeric_df = df[[shot_col, selected_col]].copy()
+        if selected_col == shot_col:
+            numeric_df = df[[shot_col]].copy()
+        else:
+            numeric_df = df[[shot_col, selected_col]].copy()
     else:
         numeric_df = df[[selected_col]].copy()
         numeric_df["shot_index"] = range(len(numeric_df))
@@ -254,6 +272,7 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
     shot_series = numeric_df[shot_col]
     if isinstance(shot_series, pd.DataFrame):
         shot_series = shot_series.iloc[:, 0]
+
     shot_series = shot_series.squeeze()
     shot_series = pd.to_numeric(shot_series, errors="coerce")
     numeric_df[shot_col] = shot_series
@@ -261,7 +280,10 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
     numeric_df = numeric_df.dropna(subset=[shot_col])
     numeric_df[shot_col] = numeric_df[shot_col].astype(int)
 
-    series = numeric_df[selected_col].astype(str)
+    series = numeric_df[selected_col]
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
+    series = series.astype(str)
     times = series.apply(parse_time_to_seconds)
     is_time = times.notnull().all()
 
@@ -277,6 +299,20 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
         st.info("No valid data to plot for this column.")
         return
 
+    if title.startswith("Manual"):
+        main_color = "rgba(255, 0, 0, 1.0)"
+    elif title.startswith("Motor"):
+        main_color = "rgba(0, 0, 255, 1.0)"
+    else:
+        main_color = "rgba(200, 200, 200, 1.0)"
+
+    if "255, 0, 0" in main_color:
+        gap_color = "rgba(255, 150, 150, 0.6)"
+    elif "0, 0, 255" in main_color:
+        gap_color = "rgba(150, 150, 255, 0.6)"
+    else:
+        gap_color = "rgba(220, 220, 220, 0.6)"
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -284,6 +320,7 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
             y=numeric_df["value"],
             mode="markers",
             name=selected_col,
+            marker=dict(color=main_color),
         )
     )
 
@@ -308,7 +345,7 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
                 x=solid_x,
                 y=solid_y,
                 mode="lines",
-                line=dict(dash="solid"),
+                line=dict(color=main_color, dash="solid"),
                 showlegend=False,
             )
         )
@@ -319,7 +356,7 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
                 x=gap_x,
                 y=gap_y,
                 mode="lines",
-                line=dict(dash="dash"),
+                line=dict(color=gap_color, dash="dash"),
                 showlegend=False,
             )
         )
@@ -331,11 +368,12 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
         template="plotly_dark",
     )
 
-    st.plotly_chart(fig, use_container_width=True)
-    st.plotly_chart(
-        px.histogram(numeric_df, x="value", nbins=bins, title=f"{selected_col} - histogram"),
-        use_container_width=True,
+    st.plotly_chart(fig, width="stretch")
+    hist_fig = px.histogram(
+        numeric_df, x="value", nbins=bins, title=f"{selected_col} - histogram"
     )
+    hist_fig.update_traces(marker=dict(color=main_color, opacity=0.75))
+    st.plotly_chart(hist_fig, width="stretch")
 
     stats_series = numeric_df["value"]
     st.write(
