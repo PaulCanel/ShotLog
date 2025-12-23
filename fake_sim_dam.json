@@ -1,0 +1,124 @@
+{
+  "project_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "raw_folder_name": "ELI50069_RAW_DATA",
+  "motor_folder_name": "motors",
+  "sim_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "raw_subfolder_name": "ELI50069_RAW_DATA",
+  "motor_subfolder_name": "motors",
+  "initial_csv_path": "/home/canelp/GitHub/ShotLog/initial.csv",
+  "max_delay_sec": 3.0,
+  "cameras": [
+    {
+      "name": "Lanex1",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex2",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex3",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex4",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lanex5",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Csi",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "Lyso",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "LanexGamma",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "TopView",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "SideView",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "DarkShadow",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "FROG",
+      "files": [
+        {
+          "keyword": "2025",
+          "ext": ".tiff"
+        },
+        {
+          "keyword": "2025",
+          "ext": ".ter"
+        }
+      ]
+    }
+  ]
+}
