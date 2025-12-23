@@ -1,0 +1,4 @@
+shot,trigger_time,Laser energy,GDD,Jet 1 pressure,Jet 2 pressure,comment
+2,15:30:08,250,28000,50,20,"test"
+3,15:30:29,258,28000,50,20,"test"
+4,15:30:39,257,28000,50,20,"test"

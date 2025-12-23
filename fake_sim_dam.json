@@ -1,8 +1,8 @@
 {
-  "project_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "project_root": "/home/canelp/GitHub/ShotLog/test_root",
   "raw_folder_name": "ELI50069_RAW_DATA",
   "motor_folder_name": "motors",
-  "sim_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "sim_root": "/home/canelp/GitHub/ShotLog/test_root",
   "raw_subfolder_name": "ELI50069_RAW_DATA",
   "motor_subfolder_name": "motors",
   "initial_csv_path": "/home/canelp/GitHub/ShotLog/initial.csv",
