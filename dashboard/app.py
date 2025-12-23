@@ -69,6 +69,9 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
 def _input_sidebar():
     st.sidebar.header("Inputs")
 
+    if "refresh_nonce" not in st.session_state:
+        st.session_state["refresh_nonce"] = 0
+
     st.sidebar.subheader("Log file")
     log_upload = st.sidebar.file_uploader(
         "Drop a log .txt file or browse", type=["txt", "log"], key="log_upload"
@@ -92,6 +95,8 @@ def _input_sidebar():
 
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
     force = st.sidebar.button("Force refresh", key="force_refresh")
+    if force:
+        st.session_state["refresh_nonce"] += 1
 
     st.sidebar.markdown("### Display options")
     show_last_shot_banner = st.sidebar.checkbox(
@@ -142,12 +147,20 @@ def _input_sidebar():
         manual_path_effective,
         motor_path_effective,
         refresh,
-        force,
         show_last_shot_banner,
+        st.session_state["refresh_nonce"],
     )
 
 
-def _load_sources(log_path: str, manual_path: str, motor_path: str):
+def _load_sources(
+    log_path: str,
+    manual_path: str,
+    motor_path: str,
+    log_sig: tuple[str, float] | None,
+    manual_sig: tuple[str, float] | None,
+    motor_sig: tuple[str, float] | None,
+    nonce: int,
+):
     errors: list[str] = []
     log_data: ParsedLog | None = None
     manual_data: ParsedManual | None = None
@@ -155,9 +168,8 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
 
     try:
         if log_path:
-            sig = file_signature(log_path)
-            if sig:
-                log_data = _cached_log_parse(log_path, sig)
+            if log_sig:
+                log_data = parsers.load_log(log_path, (log_sig, nonce))
             else:
                 errors.append(f"Log file not found: {log_path}")
     except Exception as exc:  # noqa: BLE001
@@ -165,9 +177,8 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
 
     try:
         if manual_path and log_data:
-            sig = file_signature(manual_path)
-            if sig:
-                manual_data = _cached_manual_parse(manual_path, sig)
+            if manual_sig:
+                manual_data = parsers.load_manual_csv(manual_path, (manual_sig, nonce), log_data)
             else:
                 errors.append(f"Manual CSV not found: {manual_path}")
     except Exception as exc:  # noqa: BLE001
@@ -175,9 +186,8 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
 
     try:
         if motor_path and log_data:
-            sig = file_signature(motor_path)
-            if sig:
-                motor_data = _cached_motor_parse(motor_path, sig)
+            if motor_sig:
+                motor_data = parsers.load_motor_csv(motor_path, (motor_sig, nonce), log_data)
             else:
                 errors.append(f"Motor CSV not found: {motor_path}")
     except Exception as exc:  # noqa: BLE001
@@ -186,29 +196,29 @@ def _load_sources(log_path: str, manual_path: str, motor_path: str):
     return log_data, manual_data, motor_data, errors
 
 
-@st.cache_data(show_spinner=False)
-def _cached_log_parse(path: str, signature: tuple[str, float]):
-    return parsers.parse_log_file(path)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_manual_parse(path: str, signature: tuple[str, float]):
-    return parsers.parse_manual_csv(path, log_data=None)  # type: ignore[arg-type]
-
-
-@st.cache_data(show_spinner=False)
-def _cached_motor_parse(path: str, signature: tuple[str, float]):
-    return parsers.parse_motor_csv(path, log_data=None)  # type: ignore[arg-type]
-
-
-
 def main():
-    log_path, manual_path, motor_path, refresh, force, show_last_shot_banner = _input_sidebar()
-    st_autorefresh(interval=refresh * 1000, key="autorefresh")
-    if force:
-        st.cache_data.clear()
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 0.5rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    ui_tick = st_autorefresh(interval=500, key="ui_tick")
 
-    log_data, manual_data, motor_data, errors = _load_sources(log_path, manual_path, motor_path)
+    log_path, manual_path, motor_path, refresh, show_last_shot_banner, refresh_nonce = _input_sidebar()
+    st_autorefresh(interval=refresh * 1000, key="autorefresh")
+
+    log_sig = file_signature(log_path) if log_path else None
+    manual_sig = file_signature(manual_path) if manual_path else None
+    motor_sig = file_signature(motor_path) if motor_path else None
+
+    log_data, manual_data, motor_data, errors = _load_sources(
+        log_path, manual_path, motor_path, log_sig, manual_sig, motor_sig, refresh_nonce
+    )
 
     status_placeholder = st.sidebar.empty()
     if errors:
@@ -234,19 +244,45 @@ def main():
     if log_data and show_last_shot_banner:
         views.last_shot_banner(log_data, font_size=font_size)
 
-    tabs = st.tabs(["Overview", "Per Camera", "Shots", "Manual CSV", "Motor CSV", "Diagnostics / Export"])
-    with tabs[0]:
-        views.overview_tab(log_data)
-    with tabs[1]:
-        views.per_camera_tab(log_data)
-    with tabs[2]:
-        views.shots_tab(log_data)
-    with tabs[3]:
-        views.manual_tab(manual_data, alignment)
-    with tabs[4]:
-        views.motor_tab(motor_data, alignment)
-    with tabs[5]:
-        _diagnostics_tab(log_path, manual_path, motor_path, alignment, log_data, manual_data, motor_data)
+    st.markdown(
+        """
+        <style>
+        .tab-scroll-container {
+            max-height: calc(100vh - 130px);
+            overflow-y: auto;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container():
+        st.markdown('<div class="tab-scroll-container">', unsafe_allow_html=True)
+
+        tabs = st.tabs([
+            "Overview",
+            "Per Camera",
+            "Shots",
+            "Manual CSV",
+            "Motor CSV",
+            "Diagnostics / Export",
+        ])
+        with tabs[0]:
+            views.overview_tab(log_data)
+        with tabs[1]:
+            views.per_camera_tab(log_data)
+        with tabs[2]:
+            views.shots_tab(log_data)
+        with tabs[3]:
+            views.manual_tab(manual_data, alignment)
+        with tabs[4]:
+            views.motor_tab(motor_data, alignment)
+        with tabs[5]:
+            _diagnostics_tab(
+                log_path, manual_path, motor_path, alignment, log_data, manual_data, motor_data
+            )
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _diagnostics_tab(

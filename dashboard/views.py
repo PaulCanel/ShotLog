@@ -150,17 +150,23 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
                 elapsed_text = f"{secs} s"
 
     color = _jet_color_for_elapsed(seconds)
-    bg_color = "#ffffff"
     text_color = color
     timer_color = "#000000"
 
     st.markdown(
         """
         <style>
-        .last-shot-banner {
+        .last-shot-banner-wrapper {
             position: sticky;
             top: 0;
             z-index: 999;
+        }
+        .last-shot-banner-box {
+            margin: 0;
+            padding: 0.5rem 1rem;
+            background-color: #ffffff;
+            border-bottom: 1px solid #ccc;
+            text-align: center;
         }
         </style>
         """,
@@ -171,15 +177,8 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
         size_px = max(int(font_size), 16)
         st.markdown(
             f"""
-            <div class="last-shot-banner">
-              <div style="
-                  margin-top: 0;
-                  margin-bottom: 0.5rem;
-                  padding: 1rem;
-                  text-align: center;
-                  background-color: {bg_color};
-                  border-bottom: 1px solid #ccc;
-              ">
+            <div class="last-shot-banner-wrapper">
+              <div class="last-shot-banner-box">
                 <div style="font-size: {size_px}px; font-weight: bold; color: {text_color};">
                   Last shot: {last_shot.shot_number}
                 </div>
