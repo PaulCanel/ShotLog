@@ -133,17 +133,18 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
             <style>
             .last-shot-banner-wrapper {
                 position: fixed;
-                top: 3.25rem;
+                top: 3.4rem;
                 left: 0;
                 right: 0;
                 z-index: 999;
+                text-align: center;
             }
             .last-shot-banner-box {
                 margin: 0;
-                padding: 0.5rem 1rem 0.25rem 1rem;
+                padding: 0.4rem 1rem 0.3rem 1rem;
                 background-color: #ffffff;
                 border-bottom: 1px solid #ccc;
-                text-align: center;
+                display: inline-block;
             }
             .last-shot-main {
                 font-weight: bold;
@@ -190,10 +191,9 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
                 <div class="last-shot-main" style="font-size: {size_px}px; color: {text_color};">
                   Last shot: {last_shot.shot_number}
                 </div>
-                <div style="font-size: 18px; margin-top: 0.3rem; color: {timer_color};">
+                <div style="font-size: 18px; margin-top: 0.2rem; color: {timer_color};">
                   Time since last shot: {elapsed_text}
                 </div>
-                <div style="height: 4px; background-color: #ffffff;"></div>
               </div>
             </div>
             """,
@@ -453,18 +453,12 @@ def _style_shot_row(row):
 def _jet_color_for_elapsed(seconds: float) -> str:
     """Return a hex color based on elapsed seconds using a reversed jet colormap.
 
-    0–30 s: pure red (#ff0000)
-    30–60 s: color transitions along jet_r from red to blue
+    0–60 s: continuous gradient along jet_r from red to blue
     >60 s: final blue from jet_r
     """
 
-    if seconds <= 30:
-        return "#ff0000"
-
-    if seconds >= 60:
-        t = 1.0
-    else:
-        t = (seconds - 30.0) / 30.0
+    s = max(0.0, min(seconds, 60.0))
+    t = s / 60.0
 
     cmap = cm.get_cmap("jet_r")
     r, g, b, _ = cmap(t)
