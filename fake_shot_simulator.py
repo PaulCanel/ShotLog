@@ -35,10 +35,10 @@ from tkinter import filedialog, messagebox
 PROJECT_ROOT = Path.cwd()
 
 # Nom du dossier RAW à l'intérieur de PROJECT_ROOT
-RAW_FOLDER_NAME = "ELI50069_RAW_DATA"
+RAW_FOLDER_NAME = "test_root/ELI50069_RAW_DATA"
 
 # Dossier où seront stockés les CSV moteurs (dans PROJECT_ROOT / MOTOR_FOLDER_NAME)
-MOTOR_FOLDER_NAME = "motors"
+MOTOR_FOLDER_NAME = "test_root/motors"
 
 # Date logique des shots (celle qui sera utilisée pour les sous-dossiers de date)
 # Calculée une seule fois au lancement pour conserver la même valeur durant la session
