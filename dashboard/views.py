@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable, List, Optional
 
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,7 +16,8 @@ from parsers import parse_time_to_seconds
 from styling import ACCENT, WARN_COLOR, render_card
 from utils import format_datetime, format_ratio, seconds_to_clock
 
-def overview_tab(log_data: ParsedLog):
+
+def overview_tab(log_data: ParsedLog, show_last_shot_banner: bool = False):
     gs = log_data.global_summary
     cam_missing = sum(1 for c in log_data.per_camera_summary if c.shots_missing > 0)
     cols = st.columns(6)
@@ -28,6 +31,36 @@ def overview_tab(log_data: ParsedLog):
     ]
     for col, (label, value) in zip(cols, kpis):
         col.markdown(render_card(label, value, color=ACCENT), unsafe_allow_html=True)
+
+    last_shot = None
+    if log_data.shots:
+        shots_with_time = [s for s in log_data.shots if s.trigger_time is not None]
+        if shots_with_time:
+            last_shot = max(shots_with_time, key=lambda s: s.trigger_time)
+
+    elapsed_text = "N/A"
+    bg_color = "#ffffff"
+    text_color = "#000000"
+
+    if last_shot and last_shot.trigger_time:
+        now = datetime.now()
+        delta = now - last_shot.trigger_time
+        seconds = delta.total_seconds()
+
+        if seconds < 0:
+            elapsed_text = "0 s"
+        elif seconds > 10 * 3600:
+            elapsed_text = "> 10 h"
+        else:
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            if minutes > 0:
+                elapsed_text = f"{minutes} min {secs} s"
+            else:
+                elapsed_text = f"{secs} s"
+
+        color = _jet_color_for_elapsed(seconds)
+        text_color = color
 
     st.markdown("### Missing cameras over time")
     df = _build_shot_df(log_data)
@@ -52,6 +85,29 @@ def overview_tab(log_data: ParsedLog):
         )
     else:
         st.info("No shots parsed yet.")
+
+    if show_last_shot_banner and last_shot and last_shot.trigger_time:
+        shot_num = last_shot.shot_number
+        st.markdown(
+            f"""
+            <div style="
+                margin-top: 1rem;
+                padding: 1.5rem;
+                text-align: center;
+                background-color: {bg_color};
+                border-radius: 16px;
+                border: 2px solid #444;
+            ">
+                <div style="font-size: 4rem; font-weight: bold; color: {text_color};">
+                    Last shot: {shot_num}
+                </div>
+                <div style="font-size: 1.2rem; margin-top: 0.5rem; color: #dddddd;">
+                    Time since last shot: {elapsed_text}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def per_camera_tab(log_data: ParsedLog):
@@ -96,7 +152,7 @@ def shots_tab(log_data: ParsedLog):
         st.info("No shots parsed yet.")
         return
 
-    all_cams = sorted({cam for cams in df["expected_cams"] for cam in cams})
+    all_cams = sorted({cam for cams in df["expected_cams_list"] for cam in cams})
     cam_filter = st.multiselect("Filter by camera", options=all_cams)
     only_missing = st.checkbox(
         "Only shots with missing cameras", value=False, key="shots_only_missing"
@@ -106,7 +162,9 @@ def shots_tab(log_data: ParsedLog):
 
     filtered = df
     if cam_filter:
-        filtered = filtered[filtered["expected_cams"].apply(lambda s: any(c in s for c in cam_filter))]
+        filtered = filtered[
+            filtered["expected_cams_list"].apply(lambda s: any(c in s for c in cam_filter))
+        ]
     if only_missing:
         filtered = filtered[filtered["missing_count"] > 0]
     filtered = filtered[(filtered["shot_number"] >= shot_range[0]) & (filtered["shot_number"] <= shot_range[1])]
@@ -115,7 +173,8 @@ def shots_tab(log_data: ParsedLog):
         return "OK" if row["missing_count"] == 0 else "Missing"
 
     filtered = filtered.assign(status=filtered.apply(status_row, axis=1))
-    styled = filtered.style.apply(_style_shot_row, axis=1)
+    display_df = filtered.drop(columns=["expected_cams_list"], errors="ignore")
+    styled = display_df.style.apply(_style_shot_row, axis=1)
     st.dataframe(styled, use_container_width=True, height=500)
 
 
@@ -191,7 +250,14 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
         shot_col = "shot_index"
 
     numeric_df = numeric_df.dropna(subset=[shot_col])
-    numeric_df[shot_col] = pd.to_numeric(numeric_df[shot_col], errors="coerce")
+
+    shot_series = numeric_df[shot_col]
+    if isinstance(shot_series, pd.DataFrame):
+        shot_series = shot_series.iloc[:, 0]
+    shot_series = shot_series.squeeze()
+    shot_series = pd.to_numeric(shot_series, errors="coerce")
+    numeric_df[shot_col] = shot_series
+
     numeric_df = numeric_df.dropna(subset=[shot_col])
     numeric_df[shot_col] = numeric_df[shot_col].astype(int)
 
@@ -316,7 +382,8 @@ def _build_shot_df(log_data: ParsedLog) -> pd.DataFrame:
                 "trigger_camera": shot.trigger_camera or "",
                 "first_camera": shot.first_camera or "",
                 "last_camera": shot.last_camera or "",
-                "expected_cams": sorted(shot.expected_cams),
+                "expected_cams_list": sorted(shot.expected_cams),
+                "expected_cams": ", ".join(sorted(shot.expected_cams)),
                 "missing_cams": ", ".join(sorted(shot.missing_cams)),
                 "missing_count": len(shot.missing_cams),
             }
@@ -335,3 +402,24 @@ def _style_shot_row(row):
     missing = row["missing_count"]
     color = "background-color: #006400; color: white;" if missing == 0 else "background-color: #8B0000; color: white;"
     return [color for _ in row]
+
+
+def _jet_color_for_elapsed(seconds: float) -> str:
+    """Return a hex color based on elapsed seconds using a reversed jet colormap.
+
+    0–30 s: pure red (#ff0000)
+    30–60 s: color transitions along jet_r from red to blue
+    >60 s: final blue from jet_r
+    """
+
+    if seconds <= 30:
+        return "#ff0000"
+
+    if seconds >= 60:
+        t = 1.0
+    else:
+        t = (seconds - 30.0) / 30.0
+
+    cmap = cm.get_cmap("jet_r")
+    r, g, b, _ = cmap(t)
+    return mcolors.to_hex((r, g, b))
