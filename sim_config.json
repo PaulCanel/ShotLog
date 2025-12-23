@@ -1,122 +1,224 @@
 {
   "project_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
+  "raw_root_suffix": "ELI50069_RAW_DATA",
+  "clean_root_suffix": "ELI50069_CLEAN_DATA",
+  "rename_log_folder_suffix": "ELI50069_CLEAN_DATA/shot_logs",
   "raw_folder_name": "ELI50069_RAW_DATA",
-  "motor_folder_name": "motors",
-  "sim_root": "/home/paul/Documents/GitHub/ShotLog/test_root",
-  "raw_subfolder_name": "ELI50069_RAW_DATA",
-  "motor_subfolder_name": "motors",
-  "initial_csv_path": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
-  "max_delay_sec": 3.0,
-  "cameras": [
+  "clean_folder_name": "ELI50069_CLEAN_DATA",
+  "log_folder_name": "ELI50069_CLEAN_DATA/shot_logs",
+  "full_window_s": 10.0,
+  "timeout_s": 10.0,
+  "global_trigger_keyword": "2025",
+  "apply_global_keyword_to_all": false,
+  "test_keywords": [
+    "test",
+    "align"
+  ],
+  "state_file": "shot_log_state.json",
+  "log_dir": "ELI50069_CLEAN_DATA/shot_logs",
+  "check_interval_s": 0.5,
+  "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
+  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/motors/istoric_2025-12-23.csv",
+  "motor_positions_output": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/motors_parameters/shot_motor_positions_20251223_220346.csv",
+  "use_default_motor_positions_path": true,
+  "manual_params": [
+    {
+      "name": "Laser energy",
+      "type": "number"
+    },
+    {
+      "name": "GDD",
+      "type": "number"
+    },
+    {
+      "name": "Jet 1 pressure",
+      "type": "number"
+    },
+    {
+      "name": "Jet 2 pressure",
+      "type": "number"
+    },
+    {
+      "name": "comment",
+      "type": "text"
+    }
+  ],
+  "manual_params_csv_path": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/manual_parameters/shot_manual_params_20251223_220346.csv",
+  "use_default_manual_params_path": true,
+  "manual_date_override": null,
+  "folders": [
     {
       "name": "Lanex1",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "Lanex2",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "Lanex3",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "Lanex4",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "Lanex5",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
-        }
-      ]
-    },
-    {
-      "name": "Csi",
-      "files": [
-        {
-          "keyword": "2025",
-          "ext": ".tiff"
-        }
-      ]
-    },
-    {
-      "name": "Lyso",
-      "files": [
-        {
-          "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "LanexGamma",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
-      "name": "TopView",
-      "files": [
+      "name": "Lyso",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
-      "name": "SideView",
-      "files": [
+      "name": "Csi",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "DarkShadow",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "SideView",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
+        }
+      ]
+    },
+    {
+      "name": "TopView",
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
+        {
+          "keyword": "2025",
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         }
       ]
     },
     {
       "name": "FROG",
-      "files": [
+      "expected": true,
+      "trigger": true,
+      "file_specs": [
         {
           "keyword": "2025",
-          "ext": ".tiff"
+          "extensions": [
+            ".tiff"
+          ],
+          "extension": ".tiff"
         },
         {
           "keyword": "2025",
-          "ext": ".ter"
+          "extensions": [
+            ".fer"
+          ],
+          "extension": ".fer"
         }
       ]
     }
