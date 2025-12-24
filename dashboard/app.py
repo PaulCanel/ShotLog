@@ -1,7 +1,6 @@
 """Streamlit entrypoint for the ShotLog dashboard."""
 from __future__ import annotations
 
-import io
 from datetime import datetime
 from pathlib import Path
 
@@ -13,8 +12,6 @@ from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
 import views
 from styling import BACKGROUND_DARK
 from utils import ensure_exports_dir, export_to_excel
-
-UPLOAD_DIR = Path("uploads")
 
 
 def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key: str):
@@ -59,32 +56,60 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
 def _input_sidebar():
     st.sidebar.header("Inputs")
 
+    if "log_path" not in st.session_state:
+        st.session_state["log_path"] = ""
+    if "manual_path" not in st.session_state:
+        st.session_state["manual_path"] = ""
+    if "motor_path" not in st.session_state:
+        st.session_state["motor_path"] = ""
+
     st.sidebar.subheader("Log file")
     log_upload = st.sidebar.file_uploader(
         "Drop a log .txt file or browse", type=["txt", "log"], key="log_upload"
     )
-    log_path = st.sidebar.text_input(
-        "Log file path", value=st.session_state.get("log_path", ""), key="log_path"
-    )
+    if log_upload is not None:
+        st.session_state["log_bytes"] = log_upload.getvalue()
+        st.session_state["log_name"] = log_upload.name
     log_browse = _file_browser("Browse log file", [".txt", ".log"], "log", "log_path")
+    log_path = st.sidebar.text_input(
+        "Log file path", value=st.session_state["log_path"], key="log_path"
+    )
+    if (log_browse or log_path).strip():
+        log_source = (log_browse or log_path).strip()
+    else:
+        log_source = st.session_state.get("log_bytes")
 
     st.sidebar.subheader("Manual CSV")
     manual_upload = st.sidebar.file_uploader(
         "Drop a manual CSV file or browse", type=["csv"], key="manual_upload"
     )
-    manual_path = st.sidebar.text_input(
-        "Manual CSV path", value=st.session_state.get("manual_path", ""), key="manual_path"
-    )
+    if manual_upload is not None:
+        st.session_state["manual_bytes"] = manual_upload.getvalue()
+        st.session_state["manual_name"] = manual_upload.name
     manual_browse = _file_browser("Browse manual CSV", [".csv"], "manual", "manual_path")
+    manual_path = st.sidebar.text_input(
+        "Manual CSV path", value=st.session_state["manual_path"], key="manual_path"
+    )
+    if (manual_browse or manual_path).strip():
+        manual_source = (manual_browse or manual_path).strip()
+    else:
+        manual_source = st.session_state.get("manual_bytes")
 
     st.sidebar.subheader("Motor CSV")
     motor_upload = st.sidebar.file_uploader(
         "Drop a motor CSV file or browse", type=["csv"], key="motor_upload"
     )
-    motor_path = st.sidebar.text_input(
-        "Motor CSV path", value=st.session_state.get("motor_path", ""), key="motor_path"
-    )
+    if motor_upload is not None:
+        st.session_state["motor_bytes"] = motor_upload.getvalue()
+        st.session_state["motor_name"] = motor_upload.name
     motor_browse = _file_browser("Browse motor CSV", [".csv"], "motor", "motor_path")
+    motor_path = st.sidebar.text_input(
+        "Motor CSV path", value=st.session_state["motor_path"], key="motor_path"
+    )
+    if (motor_browse or motor_path).strip():
+        motor_source = (motor_browse or motor_path).strip()
+    else:
+        motor_source = st.session_state.get("motor_bytes")
 
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
     force = st.sidebar.button("Force refresh", key="force_refresh")
@@ -111,81 +136,45 @@ def _input_sidebar():
                 st.session_state["shot_font_size"] - 8, 16
             )
 
-    UPLOAD_DIR.mkdir(exist_ok=True)
-
-    log_path_effective = (log_browse or log_path).strip() or None
-    manual_path_effective = (manual_browse or manual_path).strip() or None
-    motor_path_effective = (motor_browse or motor_path).strip() or None
-
-    if log_upload is not None:
-        log_dest = UPLOAD_DIR / log_upload.name
-        with open(log_dest, "wb") as f:
-            f.write(log_upload.getbuffer())
-        log_path_effective = str(log_dest)
-        st.session_state["log_path"] = log_path_effective
-
-    if manual_upload is not None:
-        manual_dest = UPLOAD_DIR / manual_upload.name
-        with open(manual_dest, "wb") as f:
-            f.write(manual_upload.getbuffer())
-        manual_path_effective = str(manual_dest)
-        st.session_state["manual_path"] = manual_path_effective
-
-    if motor_upload is not None:
-        motor_dest = UPLOAD_DIR / motor_upload.name
-        with open(motor_dest, "wb") as f:
-            f.write(motor_upload.getbuffer())
-        motor_path_effective = str(motor_dest)
-        st.session_state["motor_path"] = motor_path_effective
-
-    if log_path_effective and str(log_path_effective).startswith(str(UPLOAD_DIR)):
-        st.sidebar.info(
-            "Live mode: uploaded log file is a static copy. For true live updates, use a path on disk."
-        )
-    if manual_path_effective and str(manual_path_effective).startswith(str(UPLOAD_DIR)):
-        st.sidebar.info(
-            "Live mode: uploaded manual CSV is a static copy. For true live updates, use a path on disk."
-        )
-    if motor_path_effective and str(motor_path_effective).startswith(str(UPLOAD_DIR)):
-        st.sidebar.info(
-            "Live mode: uploaded motor CSV is a static copy. For true live updates, use a path on disk."
-        )
-
     return (
-        log_path_effective,
-        manual_path_effective,
-        motor_path_effective,
+        log_source,
+        manual_source,
+        motor_source,
         refresh,
         show_last_shot_banner,
     )
 
 
-def _load_sources(log_path: str | None, manual_path: str | None, motor_path: str | None):
+def _load_sources(
+    log_source: str | bytes | None,
+    manual_source: str | bytes | None,
+    motor_source: str | bytes | None,
+):
     errors: list[str] = []
     log_data: ParsedLog | None = None
     manual_data: ParsedManual | None = None
     motor_data: ParsedMotor | None = None
 
     try:
-        if log_path:
-            log_data = parsers.load_log(log_path)
+        if log_source:
+            log_data = parsers.load_log(log_source)
         else:
-            errors.append("Log file path is empty.")
+            errors.append("Log file not provided.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Log parse error: {exc}")
 
     try:
-        if manual_path and log_data:
-            manual_data = parsers.load_manual_csv(manual_path, log_data)
-        elif manual_path and not log_data:
+        if manual_source and log_data:
+            manual_data = parsers.load_manual_csv(manual_source, log_data)
+        elif manual_source and not log_data:
             errors.append("Manual CSV provided but log failed to parse.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Manual parse error: {exc}")
 
     try:
-        if motor_path and log_data:
-            motor_data = parsers.load_motor_csv(motor_path, log_data)
-        elif motor_path and not log_data:
+        if motor_source and log_data:
+            motor_data = parsers.load_motor_csv(motor_source, log_data)
+        elif motor_source and not log_data:
             errors.append("Motor CSV provided but log failed to parse.")
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Motor parse error: {exc}")
@@ -208,6 +197,10 @@ def main():
             height: 100vh;
             overflow: hidden;
         }
+        [data-testid="stAppViewContainer"] > .main {
+            height: 100%;
+            overflow: hidden;
+        }
         .block-container {
             padding-top: 0;
             padding-bottom: 0;
@@ -226,7 +219,7 @@ def main():
     if "last_data_tick" not in st.session_state:
         st.session_state["last_data_tick"] = None
 
-    log_path, manual_path, motor_path, refresh, show_last_shot_banner = _input_sidebar()
+    log_source, manual_source, motor_source, refresh, show_last_shot_banner = _input_sidebar()
     refresh_ms = max(int(refresh * 1000), 1000)
     data_tick = st_autorefresh(interval=refresh_ms, key="data_tick")
 
@@ -238,9 +231,9 @@ def main():
 
     if should_reparse:
         log_data, manual_data, motor_data, errors = _load_sources(
-            log_path,
-            manual_path,
-            motor_path,
+            log_source,
+            manual_source,
+            motor_source,
         )
         st.session_state["log_data"] = log_data
         st.session_state["manual_data"] = manual_data
@@ -260,7 +253,7 @@ def main():
         status_placeholder.success("🟢 Live")
 
     if not log_data:
-        st.info("Provide at least a log file path to start.")
+        st.info("Provide at least a log file path or upload to start.")
         return
 
     font_size = st.session_state.get("shot_font_size", 64)
@@ -318,8 +311,17 @@ def main():
         with tabs[4]:
             views.motor_tab(motor_data, alignment)
         with tabs[5]:
+            log_path_label = _source_label(log_source, "log_name")
+            manual_path_label = _source_label(manual_source, "manual_name")
+            motor_path_label = _source_label(motor_source, "motor_name")
             _diagnostics_tab(
-                log_path, manual_path, motor_path, alignment, log_data, manual_data, motor_data
+                log_path_label,
+                manual_path_label,
+                motor_path_label,
+                alignment,
+                log_data,
+                manual_data,
+                motor_data,
             )
 
         st.markdown('</div>', unsafe_allow_html=True)
@@ -340,15 +342,22 @@ def _diagnostics_tab(
     )
     st.write(f"Warnings (yellow keys): {len(alignment.yellow_keys)}")
 
-    exports_dir = ensure_exports_dir()
-    export_name = f"shotlog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    export_path = exports_dir / export_name
-    output = io.BytesIO()
-    wb_path = export_to_excel(log_data, manual_data, motor_data, alignment, dest_path=export_path)
-    with open(wb_path, "rb") as f:
-        output.write(f.read())
-    output.seek(0)
-    st.download_button("Export to Excel", data=output, file_name=export_name)
+    if st.button("Generate Excel export", key="generate_excel"):
+        exports_dir = ensure_exports_dir()
+        export_name = f"shotlog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        export_path = exports_dir / export_name
+        wb_path = export_to_excel(log_data, manual_data, motor_data, alignment, dest_path=export_path)
+        with open(wb_path, "rb") as f:
+            data = f.read()
+        st.download_button("Download Excel", data=data, file_name=export_name, key="download_excel")
+
+
+def _source_label(source: str | bytes | None, name_key: str) -> str | None:
+    if isinstance(source, str):
+        return source
+    if source is not None:
+        return st.session_state.get(name_key, "Uploaded file")
+    return None
 
 
 if __name__ == "__main__":
