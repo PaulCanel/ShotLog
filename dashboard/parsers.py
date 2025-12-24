@@ -4,7 +4,9 @@ This module exposes pure functions that transform the legacy parsing
 logic into reusable building blocks for the Streamlit dashboard.
 """
 from __future__ import annotations
+
 import csv
+import io
 import os
 import re
 from datetime import datetime
@@ -37,17 +39,12 @@ def parse_log_file(path: str) -> ParsedLog:
     """
 
     log_path = Path(path)
-    analyzer = _LogShotAnalyzer()
-    shots = analyzer.parse_log_file(log_path)
-    shots_table = _build_log_rows(shots)
-    global_summary = _compute_global_summary(shots)
-    camera_summary = _compute_camera_summary(shots)
-    return ParsedLog(
-        shots=shots,
-        shots_table=shots_table,
-        global_summary=global_summary,
-        per_camera_summary=camera_summary,
-    )
+    with log_path.open("r", encoding="utf-8") as f:
+        return _parse_log_stream(f)
+
+
+def parse_log_text(text: str) -> ParsedLog:
+    return _parse_log_stream(io.StringIO(text))
 
 
 def parse_manual_csv(path: str, log_data: ParsedLog | None = None) -> ParsedManual:
@@ -90,16 +87,29 @@ def align_datasets(log_data: ParsedLog, manual: ParsedManual, motor: ParsedMotor
     )
 
 
-def load_log(log_path: str) -> ParsedLog:
-    return parse_log_file(log_path)
+def load_log(source: str | bytes) -> ParsedLog:
+    if isinstance(source, str):
+        return parse_log_file(source)
+    text = source.decode("utf-8", errors="ignore")
+    return parse_log_text(text)
 
 
-def load_manual_csv(manual_path: str, log_data: ParsedLog | None = None) -> ParsedManual:
-    return parse_manual_csv(manual_path, log_data)
+def load_manual_csv(source: str | bytes, log_data: ParsedLog | None = None) -> ParsedManual:
+    if isinstance(source, str):
+        return parse_manual_csv(source, log_data)
+    text = source.decode("utf-8", errors="ignore")
+    header, rows = _parse_csv_stream(io.StringIO(text))
+    display_rows = _build_csv_rows(header, rows, source="manual")
+    return ParsedManual(header=header, rows=display_rows)
 
 
-def load_motor_csv(motor_path: str, log_data: ParsedLog | None = None) -> ParsedMotor:
-    return parse_motor_csv(motor_path, log_data)
+def load_motor_csv(source: str | bytes, log_data: ParsedLog | None = None) -> ParsedMotor:
+    if isinstance(source, str):
+        return parse_motor_csv(source, log_data)
+    text = source.decode("utf-8", errors="ignore")
+    header, rows = _parse_csv_stream(io.StringIO(text))
+    display_rows = _build_csv_rows(header, rows, source="motor")
+    return ParsedMotor(header=header, rows=display_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +125,10 @@ class _LogShotAnalyzer:
         self.all_expected_cameras: set[str] = set()
 
     def parse_log_file(self, path: Path) -> List[ShotRecord]:
+        with path.open("r", encoding="utf-8") as f:
+            return self.parse_log_stream(f)
+
+    def parse_log_stream(self, stream: Iterable[str]) -> List[ShotRecord]:
         self.shots = []
         self.open_shots = {}
         self.current_expected = set()
@@ -148,133 +162,132 @@ class _LogShotAnalyzer:
             r"last_camera=([^\s,]+)"
         )
 
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip("\n")
+        for line in stream:
+            line = line.rstrip("\n")
 
-                m = re_updated_expected.search(line)
-                if m:
-                    cam_list_text = m.group(1)
-                    cams = _parse_list_of_names(cam_list_text)
-                    self.current_expected = set(cams)
-                    self.all_expected_cameras.update(cams)
-                    continue
+            m = re_updated_expected.search(line)
+            if m:
+                cam_list_text = m.group(1)
+                cams = _parse_list_of_names(cam_list_text)
+                self.current_expected = set(cams)
+                self.all_expected_cameras.update(cams)
+                continue
 
-                m = re_new_shot.search(line)
-                if m:
-                    date_str = m.group(1)
-                    shot_idx = int(m.group(2))
-                    cam = m.group(3)
-                    shot = ShotRecord(
-                        date=date_str,
-                        shot_number=shot_idx,
-                        trigger_cams={cam},
-                    )
-                    self.shots.append(shot)
-                    self.open_shots[(date_str, shot_idx)] = shot
-                    continue
+            m = re_new_shot.search(line)
+            if m:
+                date_str = m.group(1)
+                shot_idx = int(m.group(2))
+                cam = m.group(3)
+                shot = ShotRecord(
+                    date=date_str,
+                    shot_number=shot_idx,
+                    trigger_cams={cam},
+                )
+                self.shots.append(shot)
+                self.open_shots[(date_str, shot_idx)] = shot
+                continue
 
-                m = re_trigger_assigned.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    cam = m.group(2)
-                    shot = self._find_open_shot_by_index(shot_idx)
-                    if shot is not None:
-                        shot.trigger_cams.add(cam)
-                    continue
+            m = re_trigger_assigned.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                cam = m.group(2)
+                shot = self._find_open_shot_by_index(shot_idx)
+                if shot is not None:
+                    shot.trigger_cams.add(cam)
+                continue
 
-                m = re_clean_copy.search(line)
-                if m:
-                    dest_path = m.group(1).strip()
-                    filename = os.path.basename(dest_path)
-                    name_match = re.match(r"([A-Za-z0-9_]+)_(\d{8})_(\d{6})_shot(\d+)", filename)
-                    if name_match:
-                        cam = name_match.group(1)
-                        date_str = name_match.group(2)
-                        time_str = name_match.group(3)
-                        shot_idx = int(name_match.group(4))
-                        dt = _parse_datetime(date_str, time_str)
-                        shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                        if shot is not None and dt is not None:
-                            shot.image_times.append(dt)
-                    continue
-
-                m = re_shot_acquired_missing_expected.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    date_str = m.group(2)
-                    expected_text = m.group(3)
-                    missing_text = m.group(4)
-                    expected_cams = set(_parse_list_of_names(expected_text))
-                    missing_cams = set(_parse_list_of_names(missing_text))
-
+            m = re_clean_copy.search(line)
+            if m:
+                dest_path = m.group(1).strip()
+                filename = os.path.basename(dest_path)
+                name_match = re.match(r"([A-Za-z0-9_]+)_(\d{8})_(\d{6})_shot(\d+)", filename)
+                if name_match:
+                    cam = name_match.group(1)
+                    date_str = name_match.group(2)
+                    time_str = name_match.group(3)
+                    shot_idx = int(name_match.group(4))
+                    dt = _parse_datetime(date_str, time_str)
                     shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                    if shot is not None:
-                        shot.expected_cams = expected_cams
-                        shot.missing_cams = missing_cams
-                        self.all_expected_cameras.update(expected_cams)
-                    self.open_shots.pop((date_str, shot_idx), None)
-                    continue
+                    if shot is not None and dt is not None:
+                        shot.image_times.append(dt)
+                continue
 
-                m = re_shot_acquired_missing.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    date_str = m.group(2)
-                    missing_text = m.group(3)
-                    missing_cams = set(_parse_list_of_names(missing_text))
+            m = re_shot_acquired_missing_expected.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                date_str = m.group(2)
+                expected_text = m.group(3)
+                missing_text = m.group(4)
+                expected_cams = set(_parse_list_of_names(expected_text))
+                missing_cams = set(_parse_list_of_names(missing_text))
 
-                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                    if shot is not None:
-                        shot.expected_cams = set(self.current_expected)
-                        shot.missing_cams = missing_cams
-                    self.open_shots.pop((date_str, shot_idx), None)
-                    continue
+                shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                if shot is not None:
+                    shot.expected_cams = expected_cams
+                    shot.missing_cams = missing_cams
+                    self.all_expected_cameras.update(expected_cams)
+                self.open_shots.pop((date_str, shot_idx), None)
+                continue
 
-                m = re_shot_acquired_ok_expected.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    date_str = m.group(2)
-                    expected_text = m.group(3)
-                    expected_cams = set(_parse_list_of_names(expected_text))
-                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                    if shot is not None:
-                        shot.expected_cams = expected_cams
-                        shot.missing_cams = set()
-                        self.all_expected_cameras.update(expected_cams)
-                    self.open_shots.pop((date_str, shot_idx), None)
-                    continue
+            m = re_shot_acquired_missing.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                date_str = m.group(2)
+                missing_text = m.group(3)
+                missing_cams = set(_parse_list_of_names(missing_text))
 
-                m = re_shot_acquired_ok.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    date_str = m.group(2)
-                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                    if shot is not None:
-                        shot.expected_cams = set(self.current_expected)
-                        shot.missing_cams = set()
-                    self.open_shots.pop((date_str, shot_idx), None)
-                    continue
+                shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                if shot is not None:
+                    shot.expected_cams = set(self.current_expected)
+                    shot.missing_cams = missing_cams
+                self.open_shots.pop((date_str, shot_idx), None)
+                continue
 
-                m = re_timing.search(line)
-                if m:
-                    shot_idx = int(m.group(1))
-                    date_str = m.group(2)
-                    trigger_cam = m.group(3).strip()
-                    trigger_time_str = m.group(4).strip()
-                    min_time_str = m.group(5).strip()
-                    max_time_str = m.group(6).strip()
-                    first_cam = m.group(7).strip()
-                    last_cam = m.group(8).strip()
+            m = re_shot_acquired_ok_expected.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                date_str = m.group(2)
+                expected_text = m.group(3)
+                expected_cams = set(_parse_list_of_names(expected_text))
+                shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                if shot is not None:
+                    shot.expected_cams = expected_cams
+                    shot.missing_cams = set()
+                    self.all_expected_cameras.update(expected_cams)
+                self.open_shots.pop((date_str, shot_idx), None)
+                continue
 
-                    shot = self._find_open_or_recent_shot(date_str, shot_idx)
-                    if shot is not None:
-                        shot.trigger_camera = trigger_cam
-                        shot.trigger_time = _parse_datetime_full(trigger_time_str)
-                        shot.min_time = _parse_datetime_full(min_time_str)
-                        shot.max_time = _parse_datetime_full(max_time_str)
-                        shot.first_camera = first_cam if first_cam != "N/A" else None
-                        shot.last_camera = last_cam if last_cam != "N/A" else None
-                    continue
+            m = re_shot_acquired_ok.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                date_str = m.group(2)
+                shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                if shot is not None:
+                    shot.expected_cams = set(self.current_expected)
+                    shot.missing_cams = set()
+                self.open_shots.pop((date_str, shot_idx), None)
+                continue
+
+            m = re_timing.search(line)
+            if m:
+                shot_idx = int(m.group(1))
+                date_str = m.group(2)
+                trigger_cam = m.group(3).strip()
+                trigger_time_str = m.group(4).strip()
+                min_time_str = m.group(5).strip()
+                max_time_str = m.group(6).strip()
+                first_cam = m.group(7).strip()
+                last_cam = m.group(8).strip()
+
+                shot = self._find_open_or_recent_shot(date_str, shot_idx)
+                if shot is not None:
+                    shot.trigger_camera = trigger_cam
+                    shot.trigger_time = _parse_datetime_full(trigger_time_str)
+                    shot.min_time = _parse_datetime_full(min_time_str)
+                    shot.max_time = _parse_datetime_full(max_time_str)
+                    shot.first_camera = first_cam if first_cam != "N/A" else None
+                    shot.last_camera = last_cam if last_cam != "N/A" else None
+                continue
 
         for shot in self.shots:
             if shot.min_time is None and shot.image_times:
@@ -384,14 +397,29 @@ def _compute_camera_summary(shots: Sequence[ShotRecord]) -> List[CameraSummary]:
 
 
 def _parse_csv(path: Path) -> tuple[list[str], list[list[str]]]:
-    header: list[str] = []
-    rows: list[list[str]] = []
     with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.reader(f, delimiter=",", quotechar='"')
-        header = next(reader, [])
-        for row in reader:
-            rows.append(row)
+        return _parse_csv_stream(f)
+
+
+def _parse_csv_stream(stream: Iterable[str]) -> tuple[list[str], list[list[str]]]:
+    reader = csv.reader(stream, delimiter=",", quotechar='"')
+    header = next(reader, [])
+    rows = [row for row in reader]
     return header, rows
+
+
+def _parse_log_stream(stream: Iterable[str]) -> ParsedLog:
+    analyzer = _LogShotAnalyzer()
+    shots = analyzer.parse_log_stream(stream)
+    shots_table = _build_log_rows(shots)
+    global_summary = _compute_global_summary(shots)
+    camera_summary = _compute_camera_summary(shots)
+    return ParsedLog(
+        shots=shots,
+        shots_table=shots_table,
+        global_summary=global_summary,
+        per_camera_summary=camera_summary,
+    )
 
 
 def _build_csv_rows(header: list[str], csv_rows: list[list[str]], source: str) -> List[DisplayRow]:

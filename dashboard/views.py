@@ -137,7 +137,9 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
                 left: 0;
                 right: 0;
                 z-index: 999;
-                text-align: center;
+                display: flex;
+                justify-content: center;
+                pointer-events: none;
             }
             .last-shot-banner-box {
                 margin: 0;
@@ -145,6 +147,7 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
                 background-color: #ffffff;
                 border-bottom: 1px solid #ccc;
                 display: inline-block;
+                pointer-events: auto;
             }
             .last-shot-main {
                 font-weight: bold;
