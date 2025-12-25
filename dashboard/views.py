@@ -148,9 +148,11 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
                 border-bottom: 1px solid #ccc;
                 display: inline-block;
                 pointer-events: auto;
+                text-align: center;
             }
             .last-shot-main {
                 font-weight: bold;
+                text-align: center;
                 transition: color 0.4s linear;
             }
             </style>
@@ -190,9 +192,9 @@ def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
         st.markdown(
             f"""
             <div class="last-shot-banner-wrapper">
-              <div class="last-shot-banner-box">
+                <div class="last-shot-banner-box">
                 <div class="last-shot-main" style="font-size: {size_px}px; color: {text_color};">
-                  Last shot: {last_shot.shot_number}
+                  Last Shot : {last_shot.shot_number}
                 </div>
                 <div style="font-size: 18px; margin-top: 0.2rem; color: {timer_color};">
                   Time since last shot: {elapsed_text}
