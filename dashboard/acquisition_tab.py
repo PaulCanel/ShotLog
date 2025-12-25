@@ -298,10 +298,14 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     with st.expander("Paths", expanded=True):
         st.text_input("Base root", value=config.project_root or "", key="paths_project_root")
-        st.text_input("RAW folder name", value=config.raw_root_suffix, key="paths_raw_suffix")
-        st.text_input("CLEAN folder name", value=config.clean_root_suffix, key="paths_clean_suffix")
+        st.text_input("RAW folder name", value=config.raw_root_suffix or "", key="paths_raw_suffix")
         st.text_input(
-            "LOG folder name", value=config.rename_log_folder_suffix, key="paths_log_suffix"
+            "CLEAN folder name", value=config.clean_root_suffix or "", key="paths_clean_suffix"
+        )
+        st.text_input(
+            "LOG folder name",
+            value=config.rename_log_folder_suffix or "",
+            key="paths_log_suffix",
         )
         if st.button("Apply paths"):
             _apply_paths(store, config)
@@ -457,15 +461,21 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         if st.button("Recompute all motor positions"):
             _recompute_motor_positions(store)
 
+    raw_next = status.get("next_shot_number")
+    if isinstance(raw_next, int) and raw_next > 0:
+        default_next = raw_next
+    else:
+        default_next = 1
+
     with st.expander("Next Shot Number", expanded=False):
         st.number_input(
             "Set next shot number",
             min_value=1,
             step=1,
-            value=int(status.get("next_shot_number", 1)),
+            value=default_next,
             key="next_shot_number",
         )
-        if st.button("Set next shot"):
+        if st.button("Set next shot", disabled=not store.shot_manager):
             _set_next_shot(store)
 
     with st.expander("Logs", expanded=False):

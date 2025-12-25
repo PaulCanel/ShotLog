@@ -207,28 +207,36 @@ class ShotLogConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "ShotLogConfig":
-        folders_data = data.get("folders", [])
+        folders_data = data.get("folders", None)
         folders: Dict[str, FolderConfig] = {}
-        for folder_dict in folders_data:
-            folder = FolderConfig.from_dict(folder_dict)
-            if folder.name:
-                folders[folder.name] = folder
-        raw_root_suffix = (
-            data.get("raw_root_suffix")
-            or data.get("raw_folder_name")
-            or "ELI50069_RAW_DATA"
-        )
-        clean_root_suffix = (
-            data.get("clean_root_suffix")
-            or data.get("clean_folder_name")
-            or "ELI50069_CLEAN_DATA"
-        )
-        rename_log_folder_suffix = (
-            data.get("rename_log_folder_suffix")
-            or data.get("log_folder_name")
-            or data.get("log_dir")
-            or "rename_log"
-        )
+        if folders_data is not None:
+            for folder_dict in folders_data:
+                folder = FolderConfig.from_dict(folder_dict)
+                if folder.name:
+                    folders[folder.name] = folder
+
+        if "raw_root_suffix" in data:
+            raw_root_suffix = data.get("raw_root_suffix")
+        elif "raw_folder_name" in data:
+            raw_root_suffix = data.get("raw_folder_name")
+        else:
+            raw_root_suffix = "ELI50069_RAW_DATA"
+
+        if "clean_root_suffix" in data:
+            clean_root_suffix = data.get("clean_root_suffix")
+        elif "clean_folder_name" in data:
+            clean_root_suffix = data.get("clean_folder_name")
+        else:
+            clean_root_suffix = "ELI50069_CLEAN_DATA"
+
+        if "rename_log_folder_suffix" in data:
+            rename_log_folder_suffix = data.get("rename_log_folder_suffix")
+        elif "log_folder_name" in data:
+            rename_log_folder_suffix = data.get("log_folder_name")
+        elif "log_dir" in data:
+            rename_log_folder_suffix = data.get("log_dir")
+        else:
+            rename_log_folder_suffix = "rename_log"
 
         raw_manual_params = data.get("manual_params", [])
         manual_params: List[ManualParam] = []
@@ -263,7 +271,7 @@ class ShotLogConfig:
             manual_date_override=data.get("manual_date_override"),
             folders=folders,
         )
-        if not cfg.folders:
+        if folders_data is None and not cfg.folders:
             cfg.folders = default_folders()
         return cfg
 
