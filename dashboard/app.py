@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import threading
 
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 import parsers
 from data_models import CombinedAlignment, ParsedLog, ParsedManual, ParsedMotor
@@ -53,6 +56,25 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
     return selected_path
 
 
+def _store_upload(upload, state_prefix: str, path_key: str):
+    uploads_dir = Path.cwd() / ".streamlit_uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    upload_bytes = upload.getvalue()
+    upload_name = upload.name
+    target_path = uploads_dir / f"{state_prefix}_{upload_name}"
+    target_path.write_bytes(upload_bytes)
+    st.session_state[f"{state_prefix}_bytes"] = upload_bytes
+    st.session_state[f"{state_prefix}_name"] = upload_name
+    st.session_state[path_key] = str(target_path)
+
+
+def _current_source(path_key: str, bytes_key: str):
+    path = st.session_state.get(path_key, "")
+    if isinstance(path, str) and path.strip():
+        return path.strip()
+    return st.session_state.get(bytes_key)
+
+
 def _input_sidebar():
     st.sidebar.header("Inputs")
 
@@ -68,48 +90,39 @@ def _input_sidebar():
         "Drop a log .txt file or browse", type=["txt", "log"], key="log_upload"
     )
     if log_upload is not None:
-        st.session_state["log_bytes"] = log_upload.getvalue()
-        st.session_state["log_name"] = log_upload.name
+        _store_upload(log_upload, "log", "log_path")
     log_browse = _file_browser("Browse log file", [".txt", ".log"], "log", "log_path")
     log_path = st.sidebar.text_input(
         "Log file path", value=st.session_state["log_path"], key="log_path"
     )
-    if (log_browse or log_path).strip():
-        log_source = (log_browse or log_path).strip()
-    else:
-        log_source = st.session_state.get("log_bytes")
+    if log_browse:
+        st.session_state["log_path"] = log_browse.strip()
 
     st.sidebar.subheader("Manual CSV")
     manual_upload = st.sidebar.file_uploader(
         "Drop a manual CSV file or browse", type=["csv"], key="manual_upload"
     )
     if manual_upload is not None:
-        st.session_state["manual_bytes"] = manual_upload.getvalue()
-        st.session_state["manual_name"] = manual_upload.name
+        _store_upload(manual_upload, "manual", "manual_path")
     manual_browse = _file_browser("Browse manual CSV", [".csv"], "manual", "manual_path")
     manual_path = st.sidebar.text_input(
         "Manual CSV path", value=st.session_state["manual_path"], key="manual_path"
     )
-    if (manual_browse or manual_path).strip():
-        manual_source = (manual_browse or manual_path).strip()
-    else:
-        manual_source = st.session_state.get("manual_bytes")
+    if manual_browse:
+        st.session_state["manual_path"] = manual_browse.strip()
 
     st.sidebar.subheader("Motor CSV")
     motor_upload = st.sidebar.file_uploader(
         "Drop a motor CSV file or browse", type=["csv"], key="motor_upload"
     )
     if motor_upload is not None:
-        st.session_state["motor_bytes"] = motor_upload.getvalue()
-        st.session_state["motor_name"] = motor_upload.name
+        _store_upload(motor_upload, "motor", "motor_path")
     motor_browse = _file_browser("Browse motor CSV", [".csv"], "motor", "motor_path")
     motor_path = st.sidebar.text_input(
         "Motor CSV path", value=st.session_state["motor_path"], key="motor_path"
     )
-    if (motor_browse or motor_path).strip():
-        motor_source = (motor_browse or motor_path).strip()
-    else:
-        motor_source = st.session_state.get("motor_bytes")
+    if motor_browse:
+        st.session_state["motor_path"] = motor_browse.strip()
 
     refresh = st.sidebar.slider("Refresh interval (sec)", 5, 120, 15, key="refresh_interval")
     force = st.sidebar.button("Force refresh", key="force_refresh")
@@ -136,13 +149,7 @@ def _input_sidebar():
                 st.session_state["shot_font_size"] - 8, 16
             )
 
-    return (
-        log_source,
-        manual_source,
-        motor_source,
-        refresh,
-        show_last_shot_banner,
-    )
+    return refresh, show_last_shot_banner
 
 
 def _load_sources(
@@ -182,6 +189,87 @@ def _load_sources(
     return log_data, manual_data, motor_data, errors
 
 
+def refresh_all_data():
+    log_source = _current_source("log_path", "log_bytes")
+    manual_source = _current_source("manual_path", "manual_bytes")
+    motor_source = _current_source("motor_path", "motor_bytes")
+    log_data, manual_data, motor_data, errors = _load_sources(
+        log_source,
+        manual_source,
+        motor_source,
+    )
+    st.session_state["log_data"] = log_data
+    st.session_state["manual_data"] = manual_data
+    st.session_state["motor_data"] = motor_data
+    st.session_state["last_errors"] = errors
+    return errors
+
+
+def _normalize_watch_paths():
+    paths = []
+    for key in ("log_path", "manual_path", "motor_path"):
+        raw = st.session_state.get(key, "")
+        if isinstance(raw, str) and raw.strip():
+            paths.append(Path(raw).expanduser().resolve())
+    return paths
+
+
+class _WatchdogHandler(FileSystemEventHandler):
+    def __init__(self, target_paths: set[Path], trigger_event: threading.Event):
+        super().__init__()
+        self._target_paths = target_paths
+        self._trigger_event = trigger_event
+
+    def on_modified(self, event):
+        self._handle_event(event)
+
+    def on_created(self, event):
+        self._handle_event(event)
+
+    def _handle_event(self, event):
+        if event.is_directory:
+            return
+        try:
+            event_path = Path(event.src_path).resolve()
+        except FileNotFoundError:
+            return
+        if event_path in self._target_paths:
+            self._trigger_event.set()
+
+
+def _stop_watchdog():
+    observer = st.session_state.get("watchdog_observer")
+    if observer:
+        observer.stop()
+        observer.join(timeout=1)
+    st.session_state["watchdog_observer"] = None
+    st.session_state["watchdog_paths"] = set()
+
+
+def _configure_watchdog(target_paths: list[Path]):
+    trigger_event = st.session_state.setdefault("watchdog_event", threading.Event())
+    current_paths = st.session_state.get("watchdog_paths", set())
+    new_paths = set(target_paths)
+
+    if not new_paths:
+        if current_paths:
+            _stop_watchdog()
+        return
+
+    if current_paths == new_paths and st.session_state.get("watchdog_observer"):
+        return
+
+    _stop_watchdog()
+    handler = _WatchdogHandler(new_paths, trigger_event)
+    observer = Observer()
+    for directory in {p.parent for p in new_paths}:
+        observer.schedule(handler, str(directory), recursive=False)
+    observer.daemon = True
+    observer.start()
+    st.session_state["watchdog_observer"] = observer
+    st.session_state["watchdog_paths"] = new_paths
+
+
 def main():
     st.set_page_config(page_title="ShotLog Dashboard", layout="wide")
     st.markdown(
@@ -219,30 +307,34 @@ def main():
     if "last_data_tick" not in st.session_state:
         st.session_state["last_data_tick"] = None
 
-    log_source, manual_source, motor_source, refresh, show_last_shot_banner = _input_sidebar()
+    refresh, show_last_shot_banner = _input_sidebar()
+    log_source = _current_source("log_path", "log_bytes")
+    manual_source = _current_source("manual_path", "manual_bytes")
+    motor_source = _current_source("motor_path", "motor_bytes")
+    _configure_watchdog(_normalize_watch_paths())
     refresh_ms = max(int(refresh * 1000), 1000)
     data_tick = st_autorefresh(interval=refresh_ms, key="data_tick")
 
     force_reparse = st.session_state.pop("force_reparse", False)
     should_reparse = False
-    if data_tick != st.session_state["last_data_tick"] or force_reparse:
+    watchdog_event = st.session_state.get("watchdog_event")
+    watchdog_triggered = bool(watchdog_event and watchdog_event.is_set())
+    if data_tick != st.session_state["last_data_tick"] or force_reparse or watchdog_triggered:
         should_reparse = True
         st.session_state["last_data_tick"] = data_tick
+        if watchdog_event:
+            watchdog_event.clear()
 
     if should_reparse:
-        log_data, manual_data, motor_data, errors = _load_sources(
-            log_source,
-            manual_source,
-            motor_source,
-        )
-        st.session_state["log_data"] = log_data
-        st.session_state["manual_data"] = manual_data
-        st.session_state["motor_data"] = motor_data
+        errors = refresh_all_data()
+        log_data = st.session_state["log_data"]
+        manual_data = st.session_state["manual_data"]
+        motor_data = st.session_state["motor_data"]
     else:
         log_data = st.session_state["log_data"]
         manual_data = st.session_state["manual_data"]
         motor_data = st.session_state["motor_data"]
-        errors = []
+        errors = st.session_state.get("last_errors", [])
 
     status_placeholder = st.sidebar.empty()
     if errors:
