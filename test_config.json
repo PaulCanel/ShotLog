@@ -18,8 +18,8 @@
   "log_dir": "ELI50069_CLEAN_DATA/shot_logs",
   "check_interval_s": 0.5,
   "motor_initial_csv": "/home/paul/Documents/GitHub/ShotLog/initial.csv",
-  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/motors/istoric_2025-12-05.csv",
-  "motor_positions_output": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/motors_parameters/shot_motor_positions_20251205_081815.csv",
+  "motor_history_csv": "/home/paul/Documents/GitHub/ShotLog/test_root/motors/istoric_2025-12-25.csv",
+  "motor_positions_output": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/motors_parameters/shot_motor_positions_20251225_182106.csv",
   "use_default_motor_positions_path": true,
   "manual_params": [
     {
@@ -43,7 +43,7 @@
       "type": "text"
     }
   ],
-  "manual_params_csv_path": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/manual_parameters/shot_manual_params_20251205_081436.csv",
+  "manual_params_csv_path": "/home/paul/Documents/GitHub/ShotLog/test_root/ELI50069_CLEAN_DATA/manual_parameters/shot_manual_params_20251225_182106.csv",
   "use_default_manual_params_path": true,
   "manual_date_override": null,
   "folders": [

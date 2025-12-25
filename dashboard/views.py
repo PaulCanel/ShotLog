@@ -50,7 +50,7 @@ def overview_tab(log_data: ParsedLog):
             view_df[["shot_number", "trigger_time", "missing_count", "missing_cams"]].rename(
                 columns={"shot_number": "Shot"}
             ),
-            use_container_width=True,
+            width=True,
             height=300,
         )
     else:
@@ -79,7 +79,7 @@ def per_camera_tab(log_data: ParsedLog):
         df = df[df["shots_missing"] > 0]
 
     styled = df.style.apply(_style_camera_row, axis=1)
-    st.dataframe(styled, use_container_width=True)
+    st.dataframe(styled, width=True)
 
     fig = px.bar(
         df.sort_values("missing_pct", ascending=False),
@@ -122,7 +122,7 @@ def shots_tab(log_data: ParsedLog):
     filtered = filtered.assign(status=filtered.apply(status_row, axis=1))
     display_df = filtered.drop(columns=["expected_cams_list"], errors="ignore")
     styled = display_df.style.apply(_style_shot_row, axis=1)
-    st.dataframe(styled, use_container_width=True, height=500)
+    st.dataframe(styled, width=True, height=500)
 
 
 def last_shot_banner(log_data: ParsedLog, font_size: int = 64):
@@ -250,7 +250,7 @@ def _csv_tab(title: str, header: List[str], rows: List, yellow_keys):
     if suspect_only:
         df = df[[rows[i].key in yellow_keys or rows[i].yellow_text for i in range(len(rows))]]
         styled = df.style.apply(_highlight, axis=1)
-    st.dataframe(styled, use_container_width=True, height=500)
+    st.dataframe(styled, width=True, height=500)
 
     st.markdown("### Quick stats")
     numeric_columns = _infer_numeric_columns(df)
