@@ -81,6 +81,6 @@ def show_diagnostics_page(store: DashboardShotStore) -> None:
             }
             for shot in shots
         ]
-        st.dataframe(rows, use_container_width=True)
+        st.dataframe(rows, width="stretch")
     else:
         st.caption("No shots found for the selected date.")

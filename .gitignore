@@ -15,3 +15,6 @@ Thumbs.db
 
 # Exports
 exports/
+
+# Ignore test_root content
+/test_root/
