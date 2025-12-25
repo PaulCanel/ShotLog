@@ -222,6 +222,8 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     config = store.current_config.clone()
     status = store.get_status()
+    system = status.get("system_status", "-")
+    config_ready = status.get("config_ready", False)
 
     store.manual_params_manager.set_active_date(status.get("active_date_str"))
 
@@ -236,10 +238,18 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         ),
         unsafe_allow_html=True,
     )
+    st.markdown(
+        (
+            "<div style='text-align:center; font-weight:bold; font-size:1.2em;'>"
+            f"System : {system}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.write(f"System: **{status.get('system_status', '-')}**")
+        st.write(f"System: **{system}**")
         st.write(f"Open shots: **{status.get('open_shots_count', 0)}**")
         st.write(f"Active date: **{status.get('active_date_str', '-')}**")
     with col2:
@@ -260,19 +270,29 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     st.markdown("---")
 
+    disable_start = not config_ready or system not in ("IDLE", "-")
+    is_running_like = system in ("RUNNING", "WAITING", "ACQUIRING")
+    disable_pause = not is_running_like
+    disable_resume = not (config_ready and system == "PAUSED")
+    disable_stop = not is_running_like
+
     col_start, col_pause, col_resume, col_stop = st.columns(4)
     with col_start:
-        if st.button("Start"):
+        if st.button("Start", disabled=disable_start):
             store.start_acquisition()
+            st.rerun()
     with col_pause:
-        if st.button("Pause"):
+        if st.button("Pause", disabled=disable_pause):
             store.pause_acquisition()
+            st.rerun()
     with col_resume:
-        if st.button("Resume"):
+        if st.button("Resume", disabled=disable_resume):
             store.resume_acquisition()
+            st.rerun()
     with col_stop:
-        if st.button("Stop"):
+        if st.button("Stop", disabled=disable_stop):
             store.stop_acquisition()
+            st.rerun()
 
     st.markdown("---")
 

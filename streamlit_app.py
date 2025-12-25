@@ -26,8 +26,8 @@ if page == "Overview":
     show_overview_page(store)
 elif page == "Acquisition":
     status = store.get_status()
-    is_running = status.get("system_status") in {"WAITING", "ACQUIRING", "RUNNING"}
-    if is_running:
+    system = status.get("system_status", "-")
+    if system in {"WAITING", "ACQUIRING", "RUNNING"}:
         st_autorefresh(interval=1000, key="acquisition_auto_refresh")
     show_acquisition_page(store)
 elif page == "Diagnostics":
