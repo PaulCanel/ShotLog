@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import streamlit as st
 
@@ -174,20 +174,47 @@ def _set_next_shot(store: DashboardShotStore) -> None:
     st.success(f"Next shot number set to {proposed:03d}.")
 
 
-def _render_status(status: dict) -> None:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("System", status.get("system_status", "-"))
-        st.metric("Open shots", status.get("open_shots_count", 0))
-        st.metric("Last shot index", status.get("last_shot_index", "-"))
-    with col2:
-        st.metric("Next shot", status.get("next_shot_number", "-"))
-        st.metric("Current keyword", status.get("current_keyword", "-"))
-        st.metric("Timing (s)", f"{status.get('full_window', '-')}/{status.get('timeout', '-')}")
-    with col3:
-        st.metric("Last shot status", status.get("last_shot_state", "-"))
-        st.metric("Current shot status", status.get("current_shot_state", "-"))
-        st.metric("Active date", status.get("active_date_str", "-"))
+def _format_last_shot_index(status: dict) -> str:
+    last_date = status.get("last_shot_date")
+    last_index = status.get("last_shot_index")
+    if last_date and last_index:
+        return f"{last_date} / shot {int(last_index):03d}"
+    return "-"
+
+
+def _format_last_shot_status(status: dict) -> tuple[str, str]:
+    last_state = status.get("last_shot_state")
+    if last_state is None:
+        return "No shot yet", "black"
+    if last_state == "acquired_ok":
+        return "Acquired – all cameras present", "green"
+    if last_state == "acquired_missing":
+        missing = status.get("last_shot_missing") or []
+        missing_text = ", ".join(missing) if missing else "unknown"
+        return f"Acquired – missing: {missing_text}", "red"
+    if last_state == "acquiring":
+        waiting = status.get("last_shot_waiting_for") or []
+        waiting_text = ", ".join(waiting) if waiting else "none"
+        return f"Acquiring – waiting for: {waiting_text}", "orange"
+    return "No shot yet", "black"
+
+
+def _format_current_shot_status(status: dict) -> tuple[str, str]:
+    cur_state = status.get("current_shot_state")
+    if cur_state == "acquiring":
+        waiting = status.get("current_shot_waiting_for") or []
+        waiting_text = ", ".join(waiting) if waiting else "none"
+        return f"Acquiring – waiting for: {waiting_text}", "orange"
+    return "Waiting next shot", "blue"
+
+
+def compute_status_text_and_color(status_dict: dict[str, Any]) -> tuple[str, str]:
+    """
+    Mirrors the ShotLog Tkinter status label logic, returning (text, css_color).
+    """
+    if status_dict.get("current_shot_state") == "acquiring":
+        return _format_current_shot_status(status_dict)
+    return _format_last_shot_status(status_dict)
 
 
 def show_acquisition_page(store: DashboardShotStore) -> None:
@@ -195,10 +222,65 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     config = store.current_config.clone()
     status = store.get_status()
+    is_running = status.get("system_status") in {"WAITING", "ACQUIRING", "RUNNING"}
+    if is_running:
+        st.markdown(
+            "<meta http-equiv='refresh' content='1'>",
+            unsafe_allow_html=True,
+        )
+
     store.manual_params_manager.set_active_date(status.get("active_date_str"))
 
     _ensure_state("manual_params_data", _serialize_manual_params(config.manual_params))
     _ensure_state("logs", [])
+
+    status_text, status_color = compute_status_text_and_color(status)
+    st.markdown(
+        (
+            "<div style='text-align:center; font-weight:bold; color:"
+            f"{status_color}; font-size:1.2em;'>Status : {status_text}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.write(f"System: **{status.get('system_status', '-')}**")
+        st.write(f"Open shots: **{status.get('open_shots_count', 0)}**")
+        st.write(f"Active date: **{status.get('active_date_str', '-')}**")
+    with col2:
+        next_shot = status.get("next_shot_number", "-")
+        st.write(f"Next shot: **{next_shot}**")
+        st.write(f"Current keyword: **{status.get('current_keyword', '-') or 'N/A'}**")
+    with col3:
+        last_shot_text, _ = _format_last_shot_status(status)
+        st.write(f"Last shot index: **{_format_last_shot_index(status)}**")
+        st.write(f"Last shot status: **{last_shot_text}**")
+    with col4:
+        current_shot_text, _ = _format_current_shot_status(status)
+        st.write(f"Current shot status: **{current_shot_text}**")
+        st.write(
+            "Timing: "
+            f"**window={status.get('full_window', '-')} / timeout={status.get('timeout', '-')}**"
+        )
+
+    st.markdown("---")
+
+    col_start, col_pause, col_resume, col_stop = st.columns(4)
+    with col_start:
+        if st.button("Start"):
+            store.start_acquisition()
+    with col_pause:
+        if st.button("Pause"):
+            store.pause_acquisition()
+    with col_resume:
+        if st.button("Resume"):
+            store.resume_acquisition()
+    with col_stop:
+        if st.button("Stop"):
+            store.stop_acquisition()
+
+    st.markdown("---")
 
     with st.expander("Paths", expanded=True):
         st.text_input("Base root", value=config.project_root or "", key="paths_project_root")
@@ -265,7 +347,7 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         if st.button("Apply trigger config"):
             _apply_trigger_config(store, config)
         st.subheader("Folder list")
-        st.dataframe(_build_folder_table(config), use_container_width=True)
+        st.dataframe(_build_folder_table(config), width="stretch")
 
     with st.expander("Configuration File", expanded=False):
         cfg_json = json.dumps(config.to_dict(), indent=2)
@@ -289,7 +371,7 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
             st.session_state["manual_params_data"],
             key="manual_params_table",
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
         )
         st.session_state["manual_params_data"] = edited
         if st.button("Save manual params"):
@@ -369,28 +451,15 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         if st.button("Set next shot"):
             _set_next_shot(store)
 
-    with st.expander("Control", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button("Start"):
-                store.start_acquisition()
-        with col2:
-            if st.button("Pause"):
-                store.pause_acquisition()
-        with col3:
-            if st.button("Resume"):
-                store.resume_acquisition()
-        with col4:
-            if st.button("Stop"):
-                store.stop_acquisition()
-
-    with st.expander("Status", expanded=False):
-        _render_status(status)
-
     with st.expander("Logs", expanded=False):
         new_messages = store.poll_gui_queue()
         if new_messages:
             st.session_state["logs"].extend(new_messages)
-        st.text_area("", value="\n".join(st.session_state["logs"]), height=200)
+        st.text_area(
+            "Logs",
+            value="\n".join(st.session_state["logs"]),
+            height=200,
+            label_visibility="collapsed",
+        )
         if st.button("Clear logs"):
             st.session_state["logs"] = []
