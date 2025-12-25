@@ -41,7 +41,7 @@ def show_overview_page(store: DashboardShotStore) -> None:
         st.json(summary.motor_positions)
 
     if st.button("Refresh overview"):
-        st.experimental_rerun()
+        st.rerun()
 
 
 def show_diagnostics_page(store: DashboardShotStore) -> None:

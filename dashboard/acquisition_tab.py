@@ -281,7 +281,7 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
             new_config = ShotLogConfig.from_dict(data)
             store.update_config(new_config)
             _sync_state_from_config(new_config)
-            st.experimental_rerun()
+            st.rerun()
 
     with st.expander("Manual parameters setup", expanded=False):
         st.caption("Define the manual parameters collected per shot.")

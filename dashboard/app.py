@@ -32,7 +32,7 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
 
         if current.parent != current and st.button("⬆️ Up one level", key=f"{state_prefix}_up"):
             st.session_state[path_key] = str(current.parent)
-            st.experimental_rerun()
+            st.rerun()
 
         entries = sorted(current.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
         dirs = [e for e in entries if e.is_dir()]
@@ -43,7 +43,7 @@ def _file_browser(label: str, exts: list[str], state_prefix: str, text_input_key
         )
         if dir_selected != "<stay here>":
             st.session_state[path_key] = str(current / dir_selected)
-            st.experimental_rerun()
+            st.rerun()
 
         file_names = [f.name for f in files if f.suffix.lower() in exts]
         file_selected = st.selectbox(
