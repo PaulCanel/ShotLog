@@ -18,29 +18,7 @@ def _ensure_state(key: str, value):
 
 
 def _sync_state_from_config(config: ShotLogConfig) -> None:
-    st.session_state.update(
-        {
-            "paths_project_root": config.project_root or "",
-            "paths_raw_suffix": config.raw_root_suffix,
-            "paths_clean_suffix": config.clean_root_suffix,
-            "paths_log_suffix": config.rename_log_folder_suffix,
-            "date_mode": "manual" if config.manual_date_override else "auto",
-            "manual_date": config.manual_date_override or "",
-            "timing_full_window": float(config.full_window_s),
-            "timing_timeout": float(config.timeout_s),
-            "global_keyword": config.global_trigger_keyword,
-            "apply_global_keyword": config.apply_global_keyword_to_all,
-            "trigger_cameras": list(config.trigger_folders),
-            "used_cameras": list(config.expected_folders),
-            "manual_params_table": _serialize_manual_params(config.manual_params),
-            "manual_params_csv": config.manual_params_csv_path or "",
-            "manual_default_path": config.use_default_manual_params_path,
-            "motor_initial_csv": config.motor_initial_csv,
-            "motor_history_csv": config.motor_history_csv,
-            "motor_output_csv": config.motor_positions_output,
-            "motor_default_path": config.use_default_motor_positions_path,
-        }
-    )
+    st.session_state["manual_params_data"] = _serialize_manual_params(config.manual_params)
 
 
 def _config_root(config: ShotLogConfig) -> Path:
@@ -138,7 +116,7 @@ def _apply_trigger_config(store: DashboardShotStore, config: ShotLogConfig) -> N
 
 
 def _apply_manual_params(store: DashboardShotStore, config: ShotLogConfig) -> None:
-    rows = st.session_state.get("manual_params_table", [])
+    rows = st.session_state.get("manual_params_data", [])
     manual_params = _deserialize_manual_params(rows)
     config.manual_params = manual_params
     _apply_config(store, config)
@@ -219,32 +197,16 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
     status = store.get_status()
     store.manual_params_manager.set_active_date(status.get("active_date_str"))
 
-    _ensure_state("paths_project_root", config.project_root or "")
-    _ensure_state("paths_raw_suffix", config.raw_root_suffix)
-    _ensure_state("paths_clean_suffix", config.clean_root_suffix)
-    _ensure_state("paths_log_suffix", config.rename_log_folder_suffix)
-    _ensure_state("date_mode", "manual" if config.manual_date_override else "auto")
-    _ensure_state("manual_date", config.manual_date_override or "")
-    _ensure_state("timing_full_window", float(config.full_window_s))
-    _ensure_state("timing_timeout", float(config.timeout_s))
-    _ensure_state("global_keyword", config.global_trigger_keyword)
-    _ensure_state("apply_global_keyword", config.apply_global_keyword_to_all)
-    _ensure_state("trigger_cameras", list(config.trigger_folders))
-    _ensure_state("used_cameras", list(config.expected_folders))
-    _ensure_state("manual_params_table", _serialize_manual_params(config.manual_params))
-    _ensure_state("manual_params_csv", config.manual_params_csv_path or "")
-    _ensure_state("manual_default_path", config.use_default_manual_params_path)
-    _ensure_state("motor_initial_csv", config.motor_initial_csv)
-    _ensure_state("motor_history_csv", config.motor_history_csv)
-    _ensure_state("motor_output_csv", config.motor_positions_output)
-    _ensure_state("motor_default_path", config.use_default_motor_positions_path)
-    _ensure_state("next_shot_number", status.get("next_shot_number", 1))
+    _ensure_state("manual_params_data", _serialize_manual_params(config.manual_params))
+    _ensure_state("logs", [])
 
     with st.expander("Paths", expanded=True):
-        st.text_input("Base root", key="paths_project_root")
-        st.text_input("RAW folder name", key="paths_raw_suffix")
-        st.text_input("CLEAN folder name", key="paths_clean_suffix")
-        st.text_input("LOG folder name", key="paths_log_suffix")
+        st.text_input("Base root", value=config.project_root or "", key="paths_project_root")
+        st.text_input("RAW folder name", value=config.raw_root_suffix, key="paths_raw_suffix")
+        st.text_input("CLEAN folder name", value=config.clean_root_suffix, key="paths_clean_suffix")
+        st.text_input(
+            "LOG folder name", value=config.rename_log_folder_suffix, key="paths_log_suffix"
+        )
         if st.button("Apply paths"):
             _apply_paths(store, config)
 
@@ -254,23 +216,52 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         st.caption(f"Log folder: {root / config.rename_log_folder_suffix}")
 
     with st.expander("Shot Date", expanded=False):
-        st.radio("Date mode", ["auto", "manual"], key="date_mode", horizontal=True)
-        st.text_input("Manual date (YYYYMMDD)", key="manual_date")
+        date_mode_default = "manual" if config.manual_date_override else "auto"
+        st.radio(
+            "Date mode",
+            ["auto", "manual"],
+            key="date_mode",
+            horizontal=True,
+            index=0 if date_mode_default == "auto" else 1,
+        )
+        st.text_input(
+            "Manual date (YYYYMMDD)", value=config.manual_date_override or "", key="manual_date"
+        )
         if st.button("Apply date mode"):
             _apply_date_mode(store, config)
 
     with st.expander("Time Window / Timeout", expanded=False):
-        st.number_input("Full time window (s)", min_value=0.0, key="timing_full_window")
-        st.number_input("Timeout (s)", min_value=0.0, key="timing_timeout")
+        st.number_input(
+            "Full time window (s)",
+            min_value=0.0,
+            value=float(config.full_window_s),
+            key="timing_full_window",
+        )
+        st.number_input(
+            "Timeout (s)",
+            min_value=0.0,
+            value=float(config.timeout_s),
+            key="timing_timeout",
+        )
         if st.button("Apply timing"):
             _apply_timing(store, config)
 
     with st.expander("Trigger & Cameras Configuration", expanded=False):
-        st.text_input("Global trigger keyword", key="global_keyword")
-        st.checkbox("Apply global keyword to all", key="apply_global_keyword")
+        st.text_input(
+            "Global trigger keyword", value=config.global_trigger_keyword, key="global_keyword"
+        )
+        st.checkbox(
+            "Apply global keyword to all",
+            value=config.apply_global_keyword_to_all,
+            key="apply_global_keyword",
+        )
         folder_names = sorted(config.folders.keys())
-        st.multiselect("Trigger cameras", folder_names, key="trigger_cameras")
-        st.multiselect("Used cameras", folder_names, key="used_cameras")
+        st.multiselect(
+            "Trigger cameras", folder_names, default=list(config.trigger_folders), key="trigger_cameras"
+        )
+        st.multiselect(
+            "Used cameras", folder_names, default=list(config.expected_folders), key="used_cameras"
+        )
         if st.button("Apply trigger config"):
             _apply_trigger_config(store, config)
         st.subheader("Folder list")
@@ -294,16 +285,26 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     with st.expander("Manual parameters setup", expanded=False):
         st.caption("Define the manual parameters collected per shot.")
-        st.data_editor(
-            st.session_state["manual_params_table"],
+        edited = st.data_editor(
+            st.session_state["manual_params_data"],
             key="manual_params_table",
             num_rows="dynamic",
+            use_container_width=True,
         )
+        st.session_state["manual_params_data"] = edited
         if st.button("Save manual params"):
             _apply_manual_params(store, config)
 
-        st.text_input("Manual params CSV path", key="manual_params_csv")
-        st.checkbox("Use default manual params path", key="manual_default_path")
+        st.text_input(
+            "Manual params CSV path",
+            value=config.manual_params_csv_path or "",
+            key="manual_params_csv",
+        )
+        st.checkbox(
+            "Use default manual params path",
+            value=config.use_default_manual_params_path,
+            key="manual_default_path",
+        )
         if st.button("Apply manual params CSV settings"):
             _apply_manual_params_paths(store, config)
 
@@ -323,31 +324,48 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
                 index = manager.param_names.index(param.name)
                 if index < len(manager.current_confirmed_values):
                     default_value = manager.current_confirmed_values[index]
-            _ensure_state(key, default_value)
             if param.type == "number":
                 try:
-                    parsed_value = float(st.session_state[key]) if st.session_state[key] else 0.0
+                    parsed_value = float(default_value) if default_value else 0.0
                 except ValueError:
                     parsed_value = 0.0
                 st.number_input(param.name, key=key, value=parsed_value)
             else:
-                st.text_input(param.name, key=key)
+                st.text_input(param.name, key=key, value=default_value)
 
         if st.button("Confirm manual params"):
             _confirm_manual_params(store, config)
 
     with st.expander("Motor data", expanded=False):
-        st.text_input("Initial positions CSV", key="motor_initial_csv")
-        st.text_input("Motor history CSV", key="motor_history_csv")
-        st.text_input("Positions by shot CSV", key="motor_output_csv")
-        st.checkbox("Use default motor output path", key="motor_default_path")
+        st.text_input(
+            "Initial positions CSV", value=config.motor_initial_csv, key="motor_initial_csv"
+        )
+        st.text_input(
+            "Motor history CSV", value=config.motor_history_csv, key="motor_history_csv"
+        )
+        st.text_input(
+            "Positions by shot CSV",
+            value=config.motor_positions_output,
+            key="motor_output_csv",
+        )
+        st.checkbox(
+            "Use default motor output path",
+            value=config.use_default_motor_positions_path,
+            key="motor_default_path",
+        )
         if st.button("Apply motor settings"):
             _apply_motor_config(store, config)
         if st.button("Recompute all motor positions"):
             _recompute_motor_positions(store)
 
     with st.expander("Next Shot Number", expanded=False):
-        st.number_input("Set next shot number", min_value=1, step=1, key="next_shot_number")
+        st.number_input(
+            "Set next shot number",
+            min_value=1,
+            step=1,
+            value=int(status.get("next_shot_number", 1)),
+            key="next_shot_number",
+        )
         if st.button("Set next shot"):
             _set_next_shot(store)
 
@@ -370,7 +388,6 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         _render_status(status)
 
     with st.expander("Logs", expanded=False):
-        _ensure_state("logs", [])
         new_messages = store.poll_gui_queue()
         if new_messages:
             st.session_state["logs"].extend(new_messages)
