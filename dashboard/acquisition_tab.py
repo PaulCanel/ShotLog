@@ -270,15 +270,19 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
     with col_start:
         if st.button("Start"):
             store.start_acquisition()
+            st.rerun()
     with col_pause:
         if st.button("Pause"):
             store.pause_acquisition()
+            st.rerun()
     with col_resume:
         if st.button("Resume"):
             store.resume_acquisition()
+            st.rerun()
     with col_stop:
         if st.button("Stop"):
             store.stop_acquisition()
+            st.rerun()
 
     st.markdown("---")
 
@@ -357,13 +361,16 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
             file_name="shotlog_config.json",
             mime="application/json",
         )
-        uploaded = st.file_uploader("Load config", type=["json"])
-        if uploaded:
-            data = json.loads(uploaded.getvalue().decode("utf-8"))
-            new_config = ShotLogConfig.from_dict(data)
-            store.update_config(new_config)
-            _sync_state_from_config(new_config)
-            st.rerun()
+        uploaded = st.file_uploader("Load config", type=["json"], key="config_uploader")
+        if uploaded is not None:
+            file_key = (uploaded.name, uploaded.size)
+            if st.session_state.get("last_config_upload") != file_key:
+                data = json.loads(uploaded.getvalue().decode("utf-8"))
+                new_config = ShotLogConfig.from_dict(data)
+                store.update_config(new_config)
+                _sync_state_from_config(new_config)
+                st.session_state["last_config_upload"] = file_key
+                st.success(f"Configuration loaded from {uploaded.name}.")
 
     with st.expander("Manual parameters setup", expanded=False):
         st.caption("Define the manual parameters collected per shot.")

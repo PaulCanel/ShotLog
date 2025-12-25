@@ -10,7 +10,7 @@ from dashboard.model import DashboardShotStore
 st.set_page_config(page_title="ShotLog Dashboard", layout="wide")
 
 if "store" not in st.session_state:
-    st.session_state.store = DashboardShotStore()
+    st.session_state.store = DashboardShotStore(config_path=None)
 
 store: DashboardShotStore = st.session_state.store
 

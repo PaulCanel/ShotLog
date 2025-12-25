@@ -7,7 +7,7 @@ from pathlib import Path
 import queue
 from typing import Dict, List
 
-from shot_log.config import DEFAULT_CONFIG, ShotLogConfig
+from shot_log.config import ShotLogConfig
 from shot_log.manual_params import ManualParamsManager, build_empty_manual_values
 from shot_log.manager import ShotManager
 from shot_log.motors import MotorStateManager
@@ -55,34 +55,41 @@ class DashboardShotStore:
     def __init__(self, config_path: Path | None = None, *, root_path: Path | None = None):
         self.gui_queue: queue.Queue[str] = queue.Queue()
         self.current_config = self._load_config(config_path)
-        base_root = (
-            Path(self.current_config.project_root)
-            if self.current_config.project_root
-            else root_path
-            if root_path
-            else Path.cwd()
-        )
-        self.shot_manager: DashboardShotManager = DashboardShotManager(
-            str(base_root),
-            self.current_config,
-            self.gui_queue,
-            manual_date_str=self.current_config.manual_date_override,
-        )
-        if self.current_config.manual_date_override:
-            self.shot_manager.set_manual_date(self.current_config.manual_date_override)
+        self.shot_manager: DashboardShotManager | None = None
         self.manual_params_manager = ManualParamsManager(
             self.current_config.manual_params,
             self._get_manual_params_output_path,
             log_fn=self._enqueue_log,
         )
-        self.motor_state_manager: MotorStateManager | None = self.shot_manager.motor_state_manager
+        self.motor_state_manager: MotorStateManager | None = None
 
     def _enqueue_log(self, message: str) -> None:
         self.gui_queue.put(message)
 
     def _load_config(self, config_path: Path | None) -> ShotLogConfig:
         if config_path is None:
-            return DEFAULT_CONFIG.clone()
+            return ShotLogConfig(
+                project_root="",
+                raw_root_suffix="",
+                clean_root_suffix="",
+                rename_log_folder_suffix="",
+                state_file="",
+                full_window_s=10.0,
+                timeout_s=20.0,
+                global_trigger_keyword="",
+                apply_global_keyword_to_all=False,
+                test_keywords=[],
+                check_interval_s=0.5,
+                motor_initial_csv="",
+                motor_history_csv="",
+                motor_positions_output="",
+                use_default_motor_positions_path=False,
+                manual_params=[],
+                manual_params_csv_path=None,
+                use_default_manual_params_path=False,
+                manual_date_override=None,
+                folders={},
+            )
         raw = Path(config_path)
         data = json.loads(raw.read_text(encoding="utf-8"))
         return ShotLogConfig.from_dict(data)
@@ -113,9 +120,20 @@ class DashboardShotStore:
 
     def update_config(self, config: ShotLogConfig) -> None:
         self.current_config = config.clone()
-        if self.shot_manager:
-            self.shot_manager.update_config(self.current_config)
-            self.motor_state_manager = self.shot_manager.motor_state_manager
+        if self.shot_manager is None:
+            base_root = (
+                Path(self.current_config.project_root)
+                if self.current_config.project_root
+                else Path.cwd()
+            )
+            self.reset_shot_manager(
+                root_path=base_root,
+                config=self.current_config,
+                manual_date_str=self.current_config.manual_date_override,
+            )
+            return
+        self.shot_manager.update_config(self.current_config)
+        self.motor_state_manager = self.shot_manager.motor_state_manager
         self.manual_params_manager.update_manual_params(self.current_config.manual_params)
 
     def start_acquisition(self) -> None:
@@ -255,6 +273,8 @@ class DashboardShotStore:
 
     def _motor_positions_for_time(self, trigger_time: datetime | None) -> Dict[str, float | None]:
         if not isinstance(trigger_time, datetime):
+            return {}
+        if not self.shot_manager:
             return {}
         manager = self.shot_manager.motor_state_manager
         if not manager:
