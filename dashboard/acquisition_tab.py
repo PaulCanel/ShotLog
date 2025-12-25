@@ -222,12 +222,6 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
 
     config = store.current_config.clone()
     status = store.get_status()
-    is_running = status.get("system_status") in {"WAITING", "ACQUIRING", "RUNNING"}
-    if is_running:
-        st.markdown(
-            "<meta http-equiv='refresh' content='1'>",
-            unsafe_allow_html=True,
-        )
 
     store.manual_params_manager.set_active_date(status.get("active_date_str"))
 
@@ -270,19 +264,15 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
     with col_start:
         if st.button("Start"):
             store.start_acquisition()
-            st.rerun()
     with col_pause:
         if st.button("Pause"):
             store.pause_acquisition()
-            st.rerun()
     with col_resume:
         if st.button("Resume"):
             store.resume_acquisition()
-            st.rerun()
     with col_stop:
         if st.button("Stop"):
             store.stop_acquisition()
-            st.rerun()
 
     st.markdown("---")
 
