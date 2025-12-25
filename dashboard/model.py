@@ -62,6 +62,9 @@ class DashboardShotStore:
             log_fn=self._enqueue_log,
         )
         self.motor_state_manager: MotorStateManager | None = None
+        self.config_flags: dict[str, bool] = {}
+        self.config_ready: bool = False
+        self._validate_config()
 
     def _enqueue_log(self, message: str) -> None:
         self.gui_queue.put(message)
@@ -94,6 +97,23 @@ class DashboardShotStore:
         data = json.loads(raw.read_text(encoding="utf-8"))
         return ShotLogConfig.from_dict(data)
 
+    def _validate_config(self) -> None:
+        cfg = self.current_config
+
+        def is_nonempty(value: str | None) -> bool:
+            return bool(value and value.strip())
+
+        flags = {
+            "project_root": is_nonempty(cfg.project_root),
+            "raw_root": is_nonempty(cfg.raw_root_suffix),
+            "clean_root": is_nonempty(cfg.clean_root_suffix),
+            "log_folder": is_nonempty(cfg.rename_log_folder_suffix),
+            "folders": bool(cfg.folders),
+            "timing": (cfg.full_window_s > 0 and cfg.timeout_s > 0),
+        }
+        self.config_flags = flags
+        self.config_ready = all(flags.values())
+
     def _get_manual_params_output_path(self) -> Path | None:
         if not self.shot_manager:
             return None
@@ -107,6 +127,7 @@ class DashboardShotStore:
         manual_date_str: str | None,
     ) -> None:
         self.current_config = config.clone()
+        self._validate_config()
         self.shot_manager = DashboardShotManager(
             str(root_path),
             self.current_config,
@@ -120,7 +141,8 @@ class DashboardShotStore:
 
     def update_config(self, config: ShotLogConfig) -> None:
         self.current_config = config.clone()
-        if self.shot_manager is None:
+        self._validate_config()
+        if self.config_ready and self.shot_manager is None:
             base_root = (
                 Path(self.current_config.project_root)
                 if self.current_config.project_root
@@ -132,8 +154,9 @@ class DashboardShotStore:
                 manual_date_str=self.current_config.manual_date_override,
             )
             return
-        self.shot_manager.update_config(self.current_config)
-        self.motor_state_manager = self.shot_manager.motor_state_manager
+        if self.shot_manager is not None:
+            self.shot_manager.update_config(self.current_config)
+            self.motor_state_manager = self.shot_manager.motor_state_manager
         self.manual_params_manager.update_manual_params(self.current_config.manual_params)
 
     def start_acquisition(self) -> None:
@@ -153,9 +176,49 @@ class DashboardShotStore:
             self.shot_manager.stop()
 
     def get_status(self) -> dict:
-        if not self.shot_manager:
-            return {}
-        return self.shot_manager.get_status()
+        if not self.config_ready:
+            return {
+                "system_status": "-",
+                "config_ready": False,
+                "open_shots_count": 0,
+                "last_shot_date": None,
+                "last_shot_index": None,
+                "last_shot_trigger_time": None,
+                "next_shot_number": None,
+                "last_completed_shot_index": None,
+                "last_completed_shot_date": None,
+                "last_completed_trigger_time": None,
+                "active_date_str": None,
+                "manual_date_str": self.current_config.manual_date_override,
+                "last_shot_state": None,
+                "current_shot_state": None,
+                "full_window": self.current_config.full_window_s,
+                "timeout": self.current_config.timeout_s,
+                "current_keyword": self.current_config.global_trigger_keyword,
+            }
+        if self.shot_manager is None:
+            return {
+                "system_status": "IDLE",
+                "config_ready": True,
+                "open_shots_count": 0,
+                "last_shot_date": None,
+                "last_shot_index": None,
+                "last_shot_trigger_time": None,
+                "next_shot_number": None,
+                "last_completed_shot_index": None,
+                "last_completed_shot_date": None,
+                "last_completed_trigger_time": None,
+                "active_date_str": None,
+                "manual_date_str": self.current_config.manual_date_override,
+                "last_shot_state": None,
+                "current_shot_state": None,
+                "full_window": self.current_config.full_window_s,
+                "timeout": self.current_config.timeout_s,
+                "current_keyword": self.current_config.global_trigger_keyword,
+            }
+        status = self.shot_manager.get_status()
+        status["config_ready"] = True
+        return status
 
     def get_last_shot_summary(self) -> LastShotSummary | None:
         if not self.shot_manager:
