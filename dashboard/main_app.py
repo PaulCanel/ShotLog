@@ -1,62 +1,86 @@
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk
+from datetime import date
 
-from .acquisition_tab import AcquisitionTab
+import streamlit as st
+
 from .model import DashboardShotStore
 
 
-class OverviewTab(ttk.Frame):
-    def __init__(self, parent: tk.Widget, store: DashboardShotStore, *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
-        self.store = store
+def show_overview_page(store: DashboardShotStore) -> None:
+    st.header("Overview")
 
-        header = ttk.Frame(self)
-        header.pack(fill="x", pady=10)
+    summary = store.get_last_shot_summary()
+    if summary:
+        status = "OK" if summary.status == "ok" else "Missing"
+        text = f"Last Shot : {summary.date_str} #{summary.shot_index:04d} — {status}"
+    else:
+        text = "Last Shot : none"
 
-        self.last_shot_label = ttk.Label(
-            header,
-            text="Last Shot : none",
-            anchor="center",
+    st.markdown(
+        f"<div style='text-align:center; font-weight:bold; font-size:1.2em;'>{text}</div>",
+        unsafe_allow_html=True,
+    )
+
+    if summary:
+        st.subheader("Détails du dernier shot")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"Trigger camera : **{summary.trigger_camera or 'N/A'}**")
+            st.write(f"Trigger time   : **{summary.trigger_time}**")
+        with col2:
+            st.write("Cameras présentes :")
+            st.write(", ".join(summary.present_cameras) or "Aucune")
+            st.write("Cameras manquantes :")
+            st.write(", ".join(summary.missing_cameras) or "Aucune")
+
+        st.subheader("Paramètres manuels")
+        st.json(summary.manual_params)
+
+        st.subheader("Positions moteurs")
+        st.json(summary.motor_positions)
+
+    if st.button("Refresh overview"):
+        st.experimental_rerun()
+
+
+def show_diagnostics_page(store: DashboardShotStore) -> None:
+    st.header("Diagnostics")
+
+    summary = store.get_last_shot_summary()
+    if summary:
+        st.subheader("Last shot summary")
+        st.write(
+            f"{summary.date_str} #{summary.shot_index:04d} — "
+            f"{'OK' if summary.status == 'ok' else 'Missing'}"
         )
-        self.last_shot_label.configure(font=("TkDefaultFont", 14, "bold"))
-        self.last_shot_label.pack(fill="x")
+        st.json(
+            {
+                "trigger_time": str(summary.trigger_time),
+                "trigger_camera": summary.trigger_camera,
+                "present_cameras": summary.present_cameras,
+                "missing_cameras": summary.missing_cameras,
+                "clean_files": {k: str(v) for k, v in summary.clean_files.items()},
+            }
+        )
+    else:
+        st.info("No shots recorded yet.")
 
-        self.after(500, self._update_overview)
-
-    def _update_overview(self):
-        summary = self.store.get_last_shot_summary()
-        if summary:
-            status = "OK" if summary.status == "ok" else "Missing"
-            text = f"Last Shot : {summary.date_str} #{summary.shot_index:04d} — {status}"
-        else:
-            text = "Last Shot : none"
-        self.last_shot_label.configure(text=text)
-        self.after(500, self._update_overview)
-
-
-def main():
-    root = tk.Tk()
-    root.title("ShotLog Dashboard")
-
-    notebook = ttk.Notebook(root)
-    notebook.pack(fill="both", expand=True)
-
-    store = DashboardShotStore()
-
-    overview_tab = OverviewTab(notebook, store=store)
-    notebook.add(overview_tab, text="Overview")
-
-    acquisition_tab = AcquisitionTab(notebook, store=store)
-    notebook.add(acquisition_tab, text="Acquisition")
-
-    diagnostics_tab = ttk.Frame(notebook)
-    notebook.add(diagnostics_tab, text="Diagnostics")
-
-    root.geometry("1200x900")
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
+    st.subheader("Shot history (in memory)")
+    target_date = st.date_input("Date", value=date.today())
+    shots = store.list_shots_for_date(target_date)
+    if shots:
+        rows = [
+            {
+                "shot_index": shot.shot_index,
+                "status": shot.status,
+                "trigger_camera": shot.trigger_camera or "-",
+                "trigger_time": shot.trigger_time,
+                "present_cameras": ", ".join(shot.present_cameras),
+                "missing_cameras": ", ".join(shot.missing_cameras),
+            }
+            for shot in shots
+        ]
+        st.dataframe(rows, use_container_width=True)
+    else:
+        st.caption("No shots found for the selected date.")
