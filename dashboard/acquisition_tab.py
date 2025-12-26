@@ -18,31 +18,46 @@ def _ensure_state(key: str, value):
 
 
 def _sync_state_from_config(config: ShotLogConfig) -> None:
+    """
+    Synchronise st.session_state avec une config donnée, pour tous les widgets
+    de la page Acquisition. IMPORTANT : cette fonction ne doit être appelée
+    qu'AVANT la création des widgets Streamlit correspondants.
+    """
+    # Paths
     st.session_state["paths_project_root"] = config.project_root or ""
     st.session_state["paths_raw_suffix"] = config.raw_root_suffix or ""
     st.session_state["paths_clean_suffix"] = config.clean_root_suffix or ""
     st.session_state["paths_log_suffix"] = config.rename_log_folder_suffix or ""
 
+    # Date
     st.session_state["date_mode"] = "manual" if config.manual_date_override else "auto"
     st.session_state["manual_date"] = config.manual_date_override or ""
 
+    # Timing
     st.session_state["timing_full_window"] = float(config.full_window_s or 0.0)
     st.session_state["timing_timeout"] = float(config.timeout_s or 0.0)
 
+    # Trigger & cameras
     st.session_state["global_keyword"] = config.global_trigger_keyword or ""
     st.session_state["apply_global_keyword"] = bool(config.apply_global_keyword_to_all)
     st.session_state["trigger_cameras"] = sorted(config.trigger_folders)
     st.session_state["used_cameras"] = sorted(config.expected_folders)
     st.session_state["folders_table_data"] = _build_folder_table(config)
 
+    # Manual params
     st.session_state["manual_params_data"] = _serialize_manual_params(config.manual_params)
     st.session_state["manual_params_csv"] = config.manual_params_csv_path or ""
     st.session_state["manual_default_path"] = bool(config.use_default_manual_params_path)
 
+    # Motors
     st.session_state["motor_initial_csv"] = config.motor_initial_csv or ""
     st.session_state["motor_history_csv"] = config.motor_history_csv or ""
     st.session_state["motor_output_csv"] = config.motor_positions_output or ""
     st.session_state["motor_default_path"] = bool(config.use_default_motor_positions_path)
+
+    # Logs
+    if "logs" not in st.session_state:
+        st.session_state["logs"] = []
 
 
 def _config_root(config: ShotLogConfig) -> Path:
@@ -243,6 +258,16 @@ def compute_status_text_and_color(status_dict: dict[str, Any]) -> tuple[str, str
 
 
 def show_acquisition_page(store: DashboardShotStore) -> None:
+    # --- 0. Appliquer une config chargée par drag & drop AVANT tout widget ---
+    if "pending_config_dict" in st.session_state:
+        try:
+            cfg_dict = st.session_state.pop("pending_config_dict")
+            new_config = ShotLogConfig.from_dict(cfg_dict)
+            store.update_config(new_config)
+            _sync_state_from_config(new_config)
+        except Exception as e:
+            st.error(f"Failed to apply pending configuration: {e}")
+
     st.header("Acquisition")
 
     config = store.current_config.clone()
@@ -394,15 +419,17 @@ def show_acquisition_page(store: DashboardShotStore) -> None:
         )
         uploaded = st.file_uploader("Load config", type=["json"], key="config_uploader")
         if uploaded is not None:
-            file_key = (uploaded.name, uploaded.size)
+            file_key = uploaded.name
             if st.session_state.get("last_config_upload") != file_key:
-                data = json.loads(uploaded.getvalue().decode("utf-8"))
-                new_config = ShotLogConfig.from_dict(data)
-                store.update_config(new_config)
-                _sync_state_from_config(new_config)
-                st.session_state["last_config_upload"] = file_key
-                st.success(f"Configuration loaded from {uploaded.name}.")
-                st.rerun()
+                try:
+                    data = json.loads(uploaded.getvalue().decode("utf-8"))
+                except Exception as e:
+                    st.error(f"Failed to read config file: {e}")
+                else:
+                    st.session_state["pending_config_dict"] = data
+                    st.session_state["last_config_upload"] = file_key
+                    st.success(f"Configuration loaded from {uploaded.name}.")
+                    st.rerun()
 
     with st.expander("Manual parameters setup", expanded=False):
         st.caption("Define the manual parameters collected per shot.")
